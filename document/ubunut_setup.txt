@@ -1,0 +1,10 @@
+sudo apt-get install cmake
+sudo apt-get install gcc-multilib
+mkdir $HOME/opt
+cd $HOME/opt
+wget https://launchpad.net/gcc-arm-embedded/4.8/4.8-2014-q1-update/+download/gcc-arm-none-eabi-4_8-2014q1-20140314-linux.tar.bz2
+tar -xvf gcc-arm-none-eabi-4_8-2014q1-20140314-linux.tar.bz2
+echo "$HOME/opt/gcc-arm-none-eabi-4_8-2014q1/bin" >> ~/.bashrc
+echo "export SERIALBOOT="~/AMiRo_ROBOT_Autonomous_Docking_v1/src/amiro-blt/bootloader/AMiRo-BLT/Host/Source/SerialBoot/build/SerialBoot"" >> ~/.bashrc
+source ~/.bashrc
+

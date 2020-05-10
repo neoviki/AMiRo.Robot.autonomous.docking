@@ -1,0 +1,65 @@
+Environment Setup:
+
+	[ Download Amiro OS ]
+
+	1. mkdir ~/AMIRO
+	2. cd AMIRO
+	3. git clone http://openresearch.cit-ec.de/git/amiro-os.amiro-os.git amiro-os
+	4. cd amiro-os
+	5. git checkout 1.0_stable
+	6. [Check README.txt for more info]
+
+
+	[ Download ChiBIOS ]
+
+	1. cd ~/AMIRO
+	2. git clone https://github.com/ChibiOS/ChibiOS.git ChibiOS
+  3. cd ChibiOS
+  4. git checkout 2e6dfc7364e7551483922ea6afbaea8f3501ab0e
+	5. cp -r ~/AMIRO/amiro-os/patches/* ~/AMIRO/ChibiOS/
+	6. Execute the following command:
+ 
+		for i in `ls | grep patch`; do git am --ignore-space-change --ignore-whitespace < ${i}; done
+
+  [ Download Amiro-BLT ]
+
+	1. cd ~/AMIRO
+	2. git clone http://openresearch.cit-ec.de/git/amiro-os.amiro-os.git amiro-blt
+	3. cd amiro-blt
+ 	4. ./setup.sh [ Project Setup and Compiler Setup]
+	5. Select   [I] - project initialization
+	6. Select   [B] - enter bootloaders setup
+	7. Select 	[S] - enter AMiRo-BLT setup
+	8. Select   [S] - build SerialBoot tool
+	9. Select 	[C] - enter compiler setup
+	10 Select   [G] - enter GCC setup
+	11.Select   [I] - install another version
+	12.Copy proper link from: [https://launchpad.net/gcc-arm-embedded/4.8/4.8-2014-q1-update]
+
+		FOR UBUNTU: https://launchpad.net/gcc-arm-embedded/4.8/4.8-2014-q1-update/+download/gcc-arm-none-eabi-4_8-2014q1-20140314-linux.tar.bz2
+		FOR MAC: https://launchpad.net/gcc-arm-embedded/4.8/4.8-2014-q1-update/+download/gcc-arm-none-eabi-4_8-2014q1-20140314-mac.tar.bz2
+		FOR Windows: https://launchpad.net/gcc-arm-embedded/4.8/4.8-2014-q1-update/+download/gcc-arm-none-eabi-4_8-2014q1-20140314-win32.exe
+
+	13. Installation directory: ~/opt/gcc-arm-none-eabi-4_8-2014q1
+	14. Link directory: ~/opt
+	15. Add serial boot to .bashrc
+		
+		echo "export SERIALBOOT=\"~/AMIRO/amiro-blt/bootloader/AMiRo-BLT/Host/Source/SerialBoot/build/SerialBoot\"" >> ~/.bashrc
+
+
+	[ Swith Branch of Amiro OS ]
+
+	1. cd ~/AMIRO
+	2. cd amiro-os
+	3. git checkout master
+	4. ./setup.sh 
+	5. Select   [I] - project initialization
+	6. git checkout 1.0_stable
+	7. cd devices
+	8. make all
+
+Additional Note:
+
+  	sudo dpkg --add-architecture i386 && sudo apt-get update
+  	sudo apt-get install libc6:i386 libstdc++6:i386 libncurses5:i386
+

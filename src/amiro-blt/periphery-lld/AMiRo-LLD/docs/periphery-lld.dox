@@ -1,0 +1,124 @@
+/*
+AMiRo-LLD is a compilation of low-level hardware drivers for the Autonomous Mini Robot (AMiRo) platform.
+Copyright (C) 2016..2019  Thomas Schöpping et al.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+/**
+ * @defgroup periphery AMiRo-LLD
+ * @details AMiRo Low Level Driver Documentation
+ */
+
+/**
+ * @defgroup lld_motor A3906 (Motor Driver)
+ * @details Motor Driver Documentation
+ * @ingroup periphery
+ */
+
+/**
+ * @defgroup lld_eeprom At24c01bn-sh-b (EEPROM)
+ * @details EEPROM Documentation
+ * @ingroup periphery
+ */
+
+/**
+ * @defgroup lld_charger Bq24103a (Battery Charger)
+ * @details Battery Charger Documentation
+ * @ingroup periphery
+ */
+
+/**
+ * @defgroup lld_gauge Bq27500 (Fuel Gauge)
+ * @details Fuel Gauge Documentation
+ * @ingroup periphery
+ */
+
+/**
+ * @defgroup lld_compass Hmc5883l (Compass)
+ * @details Compass Documentation
+ * @ingroup periphery
+ */
+
+/**
+ * @defgroup lld_power Ina219 (Power Monitor)
+ * @details Power Monitor Documentation
+ * @ingroup periphery
+ */
+
+/**
+ * @defgroup lld_gyroscope L3g4200d (Gyroscope)
+ * @details Gyroscope Documentation
+ * @ingroup periphery
+ */
+
+/**
+ * @defgroup lld_led Led
+ * @details Led Documentation
+ * @ingroup periphery
+ */
+
+/**
+ * @defgroup lld_accel Lis331dlh (Accelerometer)
+ * @details Accelerometer Documentation
+ * @ingroup periphery
+ */
+
+/**
+ * @defgroup lld_powerpath Ltc4412 (PowerPath Controller)
+ * @details PowerPath Controller Documentation
+ * @ingroup periphery
+ */
+
+/**
+ * @defgroup lld_touch Mpr121 (Touch Sensor)
+ * @details Touch Sensor Documentation
+ * @ingroup periphery
+ */
+
+/**
+ * @defgroup lld_multi Pca9544a (I2C Multiplexer)
+ * @details I2C Multiplexer Documentation
+ * @ingroup periphery
+ */
+
+/**
+ * @defgroup lld_buzzer Pklcs1212e4001 (Buzzer)
+ * @details Buzzer Documentation
+ * @ingroup periphery
+ */
+
+/**
+ * @defgroup lld_leddriver Tlc5947 (LED Driver)
+ * @details LED Driver Documentation
+ * @ingroup periphery
+ */
+
+/**
+ * @defgroup lld_switch Tps2051bdbv (Power-Distribution Switch)
+ * @details Power-Distribution Switch Documentation
+ * @ingroup periphery
+ */
+
+/**
+ * @defgroup lld_stepdown Tps62113 (Step-Down Converter)
+ * @details Step-Down Converter Documentation
+ * @ingroup periphery
+ */
+
+/**
+ * @defgroup lld_proximity Vcnl4020 (Proximity Sensor)
+ * @details Proximity Sensor Documentation
+ * @ingroup periphery
+ */

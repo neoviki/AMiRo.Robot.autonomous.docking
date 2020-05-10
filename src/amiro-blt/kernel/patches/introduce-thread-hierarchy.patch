@@ -1,0 +1,1202 @@
+diff --git a/os/rt/include/chschd.h b/os/rt/include/chschd.h
+index 1d11d17..c71d8b4 100644
+--- a/os/rt/include/chschd.h
++++ b/os/rt/include/chschd.h
+@@ -177,6 +177,23 @@ struct ch_thread {
+    */
+   trefs_t               refs;
+ #endif
++#if (CH_CFG_USE_THREADHIERARCHY == TRUE) || defined(__DOXYGEN__)
++  /**
++   * @brief   Pointer to the parent thread.
++   * @note    NULL only for the main thread.
++   */
++  thread_t              *parent;
++  /**
++   * @brief   Pointer to the first child thread.
++   * @note    NULL if there are no child threads.
++   */
++  thread_t              *children;
++  /**
++   * @brief   Pointer to the next sibling thread.
++   * @brief   NULL if there are no more child threads.
++   */
++  thread_t              *sibling;
++#endif
+   /**
+    * @brief   Number of ticks remaining to this thread.
+    */
+diff --git a/os/rt/include/chthreads.h b/os/rt/include/chthreads.h
+index 166d566..b767d74 100644
+--- a/os/rt/include/chthreads.h
++++ b/os/rt/include/chthreads.h
+@@ -79,6 +79,10 @@ typedef struct {
+    * @brief   Thread argument.
+    */
+   void              *arg;
++  /**
++   * @brief   Pointer to the parent thread.
++   */
++  thread_t          *parent;
+ } thread_descriptor_t;
+ 
+ /*===========================================================================*/
+@@ -220,7 +224,7 @@ typedef struct {
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+-   thread_t *_thread_init(thread_t *tp, const char *name, tprio_t prio);
++   thread_t *_thread_init(thread_t *tp, thread_t* parent, const char *name, tprio_t prio);
+ #if CH_DBG_FILL_THREADS == TRUE
+   void _thread_memfill(uint8_t *startp, uint8_t *endp, uint8_t v);
+ #endif
+@@ -228,8 +232,13 @@ extern "C" {
+   thread_t *chThdCreateSuspended(const thread_descriptor_t *tdp);
+   thread_t *chThdCreateI(const thread_descriptor_t *tdp);
+   thread_t *chThdCreate(const thread_descriptor_t *tdp);
++#if CH_CFG_USE_THREADHIERARCHY == TRUE
++  thread_t *chThdCreateStatic(void *wsp, size_t size,
++                              tprio_t prio, tfunc_t pf, void *arg, thread_t *parent);
++#else
+   thread_t *chThdCreateStatic(void *wsp, size_t size,
+                               tprio_t prio, tfunc_t pf, void *arg);
++#endif
+   thread_t *chThdStart(thread_t *tp);
+ #if CH_CFG_USE_REGISTRY == TRUE
+   thread_t *chThdAddRef(thread_t *tp);
+diff --git a/os/rt/src/chsys.c b/os/rt/src/chsys.c
+index 346a8ba..c789d01 100644
+--- a/os/rt/src/chsys.c
++++ b/os/rt/src/chsys.c
+@@ -126,13 +126,13 @@ void chSysInit(void) {
+ #if CH_CFG_NO_IDLE_THREAD == FALSE
+   /* Now this instructions flow becomes the main thread.*/
+ #if CH_CFG_USE_REGISTRY == TRUE
+-  currp = _thread_init(&ch.mainthread, (const char *)&ch_debug, NORMALPRIO);
++  currp = _thread_init(&ch.mainthread, NULL, (const char *)&ch_debug, NORMALPRIO);
+ #else
+-  currp = _thread_init(&ch.mainthread, "main", NORMALPRIO);
++  currp = _thread_init(&ch.mainthread, NULL, "main", NORMALPRIO);
+ #endif
+ #else
+   /* Now this instructions flow becomes the idle thread.*/
+-  currp = _thread_init(&ch.mainthread, "idle", IDLEPRIO);
++  currp = _thread_init(&ch.mainthread, NULL, "idle", IDLEPRIO);
+ #endif
+ 
+ #if CH_DBG_ENABLE_STACK_CHECK == TRUE
+@@ -172,6 +172,7 @@ void chSysInit(void) {
+       THD_WORKING_AREA_END(ch_idle_thread_wa),
+       IDLEPRIO,
+       _idle_thread,
++      NULL,
+       NULL
+     };
+ 
+diff --git a/os/rt/src/chthreads.c b/os/rt/src/chthreads.c
+index 171c683..6bc0f78 100644
+--- a/os/rt/src/chthreads.c
++++ b/os/rt/src/chthreads.c
+@@ -70,6 +70,46 @@
+ /* Module local functions.                                                   */
+ /*===========================================================================*/
+ 
++#if CH_CFG_USE_THREADHIERARCHY == TRUE || defined(__DOXYGEN__)
++/**
++ * @brief   Insert a thread to the list of children of another thread.
++ * @details If @p CH_CFG_THREADHIERARCHY_ORDERED is @p TRUE, children are ordered by their priorities (high to low).
++ *          Children with identical priority are ordered by 'age' (youngest first).
++ *
++ * @param[in] parent  Pointer to the parent thread (must not be NULL).
++ * @param[in] child   Pointer to the child thread (must not be NULL).
++ */
++inline void _thread_addChild(thread_t *parent, thread_t *child) {
++#if CH_CFG_THREADHIERARCHY_ORDERED == TRUE
++  thread_t *sibling = parent->children;
++  child->parent = parent;
++#if CH_CFG_USE_MUTEXES == TRUE
++  if (sibling == NULL || sibling->realprio <= child->realprio) {
++#else
++  if (sibling == NULL || sibling->prio <= child->prio) {
++#endif
++    child->sibling = sibling;
++    parent->children = child;
++  } else {
++#if CH_CFG_USE_MUTEXES == TRUE
++    while (sibling->sibling != NULL && sibling->sibling->realprio > child->realprio) {
++#else
++    while (sibling->sibling != NULL && sibling->sibling->prio > child->prio) {
++#endif
++      sibling = sibling->sibling;
++    }
++    child->sibling = sibling->sibling;
++    sibling->sibling = child;
++  }
++#else
++  child->parent = parent;
++  child->sibling = parent->children;
++  parent->children = child;
++#endif
++  return;
++}
++#endif
++
+ /*===========================================================================*/
+ /* Module exported functions.                                                */
+ /*===========================================================================*/
+@@ -79,13 +119,14 @@
+  * @note    This is an internal functions, do not use it in application code.
+  *
+  * @param[in] tp        pointer to the thread
++ * @param[in] parent    pointer to the parent thread
+  * @param[in] name      thread name
+  * @param[in] prio      the priority level for the new thread
+  * @return              The same thread pointer passed as parameter.
+  *
+  * @notapi
+  */
+-thread_t *_thread_init(thread_t *tp, const char *name, tprio_t prio) {
++thread_t *_thread_init(thread_t *tp, thread_t *parent,  const char *name, tprio_t prio) {
+ 
+   tp->prio      = prio;
+   tp->state     = CH_STATE_WTSTART;
+@@ -110,6 +151,17 @@ thread_t *_thread_init(thread_t *tp, const char *name, tprio_t prio) {
+ #else
+   (void)name;
+ #endif
++#if CH_CFG_USE_THREADHIERARCHY == TRUE
++  if (parent != NULL) {
++    _thread_addChild(parent, tp);
++  } else {
++    tp->parent = parent;
++    tp->sibling = NULL;
++  }
++  tp->children = NULL;
++#else
++  (void)parent;
++#endif
+ #if CH_CFG_USE_WAITEXIT == TRUE
+   list_init(&tp->waiting);
+ #endif
+@@ -190,7 +242,7 @@ thread_t *chThdCreateSuspendedI(const thread_descriptor_t *tdp) {
+   PORT_SETUP_CONTEXT(tp, tdp->wbase, tp, tdp->funcp, tdp->arg);
+ 
+   /* The driver object is initialized but not started.*/
+-  return _thread_init(tp, tdp->name, tdp->prio);
++  return _thread_init(tp, tdp->parent, tdp->name, tdp->prio);
+ }
+ 
+ /**
+@@ -315,13 +367,21 @@ thread_t *chThdCreate(const thread_descriptor_t *tdp) {
+  * @param[in] pf        the thread function
+  * @param[in] arg       an argument passed to the thread function. It can be
+  *                      @p NULL.
++ * @param[in] parent    pointer to a parent thread. Parameter only available if
++ *                      @p CH_CFG_USE_THREADHIERARCHY is @p TRUE. It can be
++ *                      @p NULL.
+  * @return              The pointer to the @p thread_t structure allocated for
+  *                      the thread into the working space area.
+  *
+  * @api
+  */
++#if (CH_CFG_USE_THREADHIERARCHY == TRUE) || defined(__DOXYGEN__)
++thread_t *chThdCreateStatic(void *wsp, size_t size,
++                            tprio_t prio, tfunc_t pf, void *arg, thread_t *parent) {
++#else
+ thread_t *chThdCreateStatic(void *wsp, size_t size,
+                             tprio_t prio, tfunc_t pf, void *arg) {
++#endif
+   thread_t *tp;
+ 
+   chDbgCheck((wsp != NULL) &&
+@@ -358,7 +418,11 @@ thread_t *chThdCreateStatic(void *wsp, size_t size,
+   /* Setting up the port-dependent part of the working area.*/
+   PORT_SETUP_CONTEXT(tp, wsp, tp, pf, arg);
+ 
+-  tp = _thread_init(tp, "noname", prio);
++#if CH_CFG_USE_THREADHIERARCHY == TRUE
++  tp = _thread_init(tp, parent, "noname", prio);
++#else
++  tp = _thread_init(tp, NULL, "noname", prio);
++#endif
+ 
+   /* Starting the thread immediately.*/
+   chSchWakeupS(tp, MSG_OK);
+@@ -529,6 +593,30 @@ void chThdExitS(msg_t msg) {
+ #endif
+ #endif
+ 
++#if CH_CFG_USE_THREADHIERARCHY == TRUE
++  thread_t *child;
++  /* Remove from parent's list of children. */
++  if (tp->parent != NULL) {
++    if (tp->parent->children == tp) {
++      tp->parent->children = tp->sibling;
++    } else {
++      child = tp->parent->children;
++      while (child->sibling != tp) {
++        child = child->sibling;
++      }
++      child->sibling = tp->sibling;
++    }
++    tp->parent = NULL;
++  }
++  tp->sibling = NULL;
++  /* Move any child threads to the main thread. */
++  while (tp->children != NULL) {
++    child = tp->children;
++    tp->children = child->sibling;
++    _thread_addChild(&ch.mainthread, child);
++  }
++#endif
++
+   /* Going into final state.*/
+   chSchGoSleepS(CH_STATE_FINAL);
+ 
+@@ -611,6 +699,43 @@ tprio_t chThdSetPriority(tprio_t newprio) {
+   oldprio = currp->prio;
+   currp->prio = newprio;
+ #endif
++#if (CH_CFG_USE_THREADHIERARCHY == TRUE) && (CH_CFG_THREADHIERARCHY_ORDERED == TRUE)
++  /* Reorder sibling list. */
++  if (currp->parent != NULL && newprio != oldprio) {
++    thread_t *sibling, *oldsibling;
++    if (newprio > oldprio) {
++      oldsibling = currp->sibling;
++      _thread_addChild(currp->parent, currp);
++      sibling = currp->sibling;
++      if (sibling != NULL) {
++        while (sibling->sibling != currp) {
++          sibling = sibling->sibling;
++        }
++        sibling->sibling = oldsibling;
++      }
++    } else /*if (newprio < oldprio)*/ {
++      sibling = currp->parent->children;
++      if (sibling == currp) {
++        currp->parent->children = currp->sibling;
++        _thread_addChild(currp->parent, currp);
++      } else {
++        while (sibling->sibling != currp) {
++          sibling = sibling->sibling;
++        }
++        sibling->sibling = currp->sibling;
++#if CH_CFG_USE_MUTEXES == TRUE
++        while (sibling->sibling != NULL && sibling->sibling->realprio > currp->realprio) {
++#else
++        while (sibling->sibling != NULL && sibling->sibling->prio > currp->prio) {
++#endif
++          sibling = sibling->sibling;
++        }
++        currp->sibling = sibling->sibling;
++        sibling->sibling = currp;
++      }
++    }
++  }
++#endif
+   chSchRescheduleS();
+   chSysUnlock();
+ 
+diff --git a/test/rt/source/test/rt_test_root.c b/test/rt/source/test/rt_test_root.c
+index e03d0f1..150d33d 100644
+--- a/test/rt/source/test/rt_test_root.c
++++ b/test/rt/source/test/rt_test_root.c
+@@ -106,6 +106,14 @@ void * ROMCONST wa[5] = {test_buffer + (WA_SIZE * 0),
+                          test_buffer + (WA_SIZE * 3),
+                          test_buffer + (WA_SIZE * 4)};
+ 
++thread_t *test_create_thread(void *wsp, size_t size, tprio_t prio, tfunc_t pf, void *arg) {
++#if CH_CFG_USE_THREADHIERARCHY == TRUE
++  return chThdCreateStatic(wsp, size, prio, pf, arg, chThdGetSelfX());
++#else
++  return chThdCreateStatic(wsp, size, prio, pf, arg);
++#endif
++}
++
+ /*
+  * Sets a termination request in all the test-spawned threads.
+  */
+diff --git a/test/rt/source/test/rt_test_root.h b/test/rt/source/test/rt_test_root.h
+index 6da777b..0cd40fc 100644
+--- a/test/rt/source/test/rt_test_root.h
++++ b/test/rt/source/test/rt_test_root.h
+@@ -88,6 +88,7 @@ extern thread_t *threads[MAX_THREADS];
+ extern void * ROMCONST wa[5];
+ 
+ void test_print_port_info(void);
++thread_t *test_create_thread(void *wsp, size_t size, tprio_t prio, tfunc_t pf, void *arg);
+ void test_terminate_threads(void);
+ void test_wait_threads(void);
+ systime_t test_wait_tick(void);
+diff --git a/test/rt/source/test/rt_test_sequence_001.c b/test/rt/source/test/rt_test_sequence_001.c
+index 6f2b96f..f91c23f 100644
+--- a/test/rt/source/test/rt_test_sequence_001.c
++++ b/test/rt/source/test/rt_test_sequence_001.c
+@@ -193,6 +193,12 @@ static void rt_test_001_003_execute(void) {
+     test_print("--- CH_CFG_USE_REGISTRY:                ");
+     test_printn(CH_CFG_USE_REGISTRY);
+     test_println("");
++    test_print("--- CH_CFG_USE_THREADHIERARCHY:         ");
++    test_printn(CH_CFG_USE_THREADHIERARCHY);
++    test_println("");
++    test_print("--- CH_CFG_THREADHIERARCHY_ORDERED:     ");
++    test_printn(CH_CFG_THREADHIERARCHY_ORDERED);
++    test_println("");
+     test_print("--- CH_CFG_USE_WAITEXIT:                ");
+     test_printn(CH_CFG_USE_WAITEXIT);
+     test_println("");
+@@ -207,7 +213,7 @@ static void rt_test_001_003_execute(void) {
+     test_println("");
+     test_print("--- CH_CFG_USE_MUTEXES_RECURS:          ");
+     test_printn(CH_CFG_USE_MUTEXES_RECURSIVE);
+-    test_println("");   
++    test_println("");
+     test_print("--- CH_CFG_USE_CONDVARS:                ");
+     test_printn(CH_CFG_USE_CONDVARS);
+     test_println("");
+diff --git a/test/rt/source/test/rt_test_sequence_003.c b/test/rt/source/test/rt_test_sequence_003.c
+index 8598b12..f1ece71 100644
+--- a/test/rt/source/test/rt_test_sequence_003.c
++++ b/test/rt/source/test/rt_test_sequence_003.c
+@@ -46,6 +46,20 @@ static THD_FUNCTION(thread, p) {
+   test_emit_token(*(char *)p);
+ }
+ 
++#if (CH_CFG_USE_THREADHIERARCHY)
++static THD_FUNCTION(hierarchythread, p) {
++
++  do {
++    if (*(tprio_t *)p != chThdGetPriorityX()) {
++      chThdSetPriority(*(tprio_t *)p);
++    }
++    chThdSleepMilliseconds(10);
++  } while (!chThdShouldTerminateX());
++
++  chThdExit(MSG_OK);
++}
++#endif
++
+ /****************************************************************************
+  * Test cases.
+  ****************************************************************************/
+@@ -166,11 +180,11 @@ static void rt_test_003_002_execute(void) {
+      sequence is tested.*/
+   test_set_step(1);
+   {
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX()-5, thread, "E");
+-    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, chThdGetPriorityX()-4, thread, "D");
+-    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, chThdGetPriorityX()-3, thread, "C");
+-    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, chThdGetPriorityX()-2, thread, "B");
+-    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, chThdGetPriorityX()-1, thread, "A");
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX()-5, thread, "E");
++    threads[1] = test_create_thread(wa[1], WA_SIZE, chThdGetPriorityX()-4, thread, "D");
++    threads[2] = test_create_thread(wa[2], WA_SIZE, chThdGetPriorityX()-3, thread, "C");
++    threads[3] = test_create_thread(wa[3], WA_SIZE, chThdGetPriorityX()-2, thread, "B");
++    threads[4] = test_create_thread(wa[4], WA_SIZE, chThdGetPriorityX()-1, thread, "A");
+     test_wait_threads();
+     test_assert_sequence("ABCDE", "invalid sequence");
+   }
+@@ -179,11 +193,11 @@ static void rt_test_003_002_execute(void) {
+      sequence is tested.*/
+   test_set_step(2);
+   {
+-    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, chThdGetPriorityX()-1, thread, "A");
+-    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, chThdGetPriorityX()-2, thread, "B");
+-    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, chThdGetPriorityX()-3, thread, "C");
+-    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, chThdGetPriorityX()-4, thread, "D");
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX()-5, thread, "E");
++    threads[4] = test_create_thread(wa[4], WA_SIZE, chThdGetPriorityX()-1, thread, "A");
++    threads[3] = test_create_thread(wa[3], WA_SIZE, chThdGetPriorityX()-2, thread, "B");
++    threads[2] = test_create_thread(wa[2], WA_SIZE, chThdGetPriorityX()-3, thread, "C");
++    threads[1] = test_create_thread(wa[1], WA_SIZE, chThdGetPriorityX()-4, thread, "D");
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX()-5, thread, "E");
+     test_wait_threads();
+     test_assert_sequence("ABCDE", "invalid sequence");
+   }
+@@ -192,11 +206,11 @@ static void rt_test_003_002_execute(void) {
+      sequence is tested.*/
+   test_set_step(3);
+   {
+-    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, chThdGetPriorityX()-4, thread, "D");
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX()-5, thread, "E");
+-    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, chThdGetPriorityX()-1, thread, "A");
+-    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, chThdGetPriorityX()-2, thread, "B");
+-    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, chThdGetPriorityX()-3, thread, "C");
++    threads[1] = test_create_thread(wa[1], WA_SIZE, chThdGetPriorityX()-4, thread, "D");
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX()-5, thread, "E");
++    threads[4] = test_create_thread(wa[4], WA_SIZE, chThdGetPriorityX()-1, thread, "A");
++    threads[3] = test_create_thread(wa[3], WA_SIZE, chThdGetPriorityX()-2, thread, "B");
++    threads[2] = test_create_thread(wa[2], WA_SIZE, chThdGetPriorityX()-3, thread, "C");
+     test_wait_threads();
+     test_assert_sequence("ABCDE", "invalid sequence");
+   }
+@@ -325,6 +339,405 @@ static const testcase_t rt_test_003_004 = {
+ };
+ #endif /* CH_CFG_USE_MUTEXES */
+ 
++#if (CH_CFG_USE_THREADHIERARCHY) || defined(__DOXYGEN__)
++/**
++ * @page rt_test_003_005 [3.5] Thread hierarach with (un)ordered lists.
++ *
++ * <h2>Description</h2>
++ * Todo
++ *
++ * <h2>Conditions</h2>
++ * This test is only executed if the following preprocessor condition
++ * evaluates to true:
++ * - CH_CFG_USE_THREADHIERARCHY
++ * This test comprises additional tests if the following preprocessor
++ * condition evaluates to true:
++ * - CH_CFG_THREADHIERARCHY_ORDERED
++ * .
++ *
++ * <h2>Test Steps</h2>
++ * Todo
++ * .
++ */
++
++static void rt_test_003_005_execute(void) {
++
++  /* [3.5.1] Creating 1 parent and 4 child threads with increasing priority,
++   * hierarchy information is tested */
++  test_set_step(1);
++  {
++    tprio_t prios[MAX_THREADS];
++    thread_t *threads_cpy[MAX_THREADS];
++    thread_t *parents[MAX_THREADS];
++    thread_t *siblings[MAX_THREADS];
++    prios[0] = chThdGetPriorityX()-1;
++    prios[1] = chThdGetPriorityX()-5;
++    prios[2] = chThdGetPriorityX()-4;
++    prios[3] = chThdGetPriorityX()-3;
++    prios[4] = chThdGetPriorityX()-2;
++    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, prios[0], hierarchythread, &prios[0], chThdGetSelfX());
++    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, prios[1], hierarchythread, &prios[1], threads[0]);
++    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, prios[2], hierarchythread, &prios[2], threads[0]);
++    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, prios[3], hierarchythread, &prios[3], threads[0]);
++    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, prios[4], hierarchythread, &prios[4], threads[0]);
++    threads_cpy[0] = threads[0];
++    threads_cpy[1] = threads[1];
++    threads_cpy[2] = threads[2];
++    threads_cpy[3] = threads[3];
++    threads_cpy[4] = threads[4];
++    parents[0] = threads[0]->parent;
++    parents[1] = threads[1]->parent;
++    parents[2] = threads[2]->parent;
++    parents[3] = threads[3]->parent;
++    parents[4] = threads[4]->parent;
++    siblings[0] = threads[0]->children;
++    siblings[1] = threads[1]->sibling;
++    siblings[2] = threads[2]->sibling;
++    siblings[3] = threads[3]->sibling;
++    siblings[4] = threads[4]->sibling;
++    chThdTerminate(threads[0]);
++    chThdTerminate(threads[1]);
++    chThdTerminate(threads[2]);
++    chThdTerminate(threads[3]);
++    chThdTerminate(threads[4]);
++    test_wait_threads();
++    test_assert(parents[0] == chThdGetSelfX() &&
++                parents[1] == threads_cpy[0] &&
++                parents[2] == threads_cpy[0] &&
++                parents[3] == threads_cpy[0] &&
++                parents[4] == threads_cpy[0] &&
++                siblings[0] == threads_cpy[4] &&
++                siblings[1] == NULL &&
++                siblings[2] == threads_cpy[1] &&
++                siblings[3] == threads_cpy[2] &&
++                siblings[4] == threads_cpy[3], "invalid children list");
++  }
++
++  /* [3.5.2] Creating 1 parent and 4 child threads with decreasing priority,
++   * hierarchy information is tested.*/
++  test_set_step(2);
++  {
++    tprio_t prios[MAX_THREADS];
++    thread_t *threads_cpy[MAX_THREADS];
++    thread_t *parents[MAX_THREADS];
++    thread_t *siblings[MAX_THREADS];
++    prios[0] = chThdGetPriorityX()-1;
++    prios[1] = chThdGetPriorityX()-2;
++    prios[2] = chThdGetPriorityX()-3;
++    prios[3] = chThdGetPriorityX()-4;
++    prios[4] = chThdGetPriorityX()-5;
++    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, prios[0], hierarchythread, &prios[0], chThdGetSelfX());
++    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, prios[1], hierarchythread, &prios[1], threads[0]);
++    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, prios[2], hierarchythread, &prios[2], threads[0]);
++    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, prios[3], hierarchythread, &prios[3], threads[0]);
++    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, prios[4], hierarchythread, &prios[4], threads[0]);
++    threads_cpy[0] = threads[0];
++    threads_cpy[1] = threads[1];
++    threads_cpy[2] = threads[2];
++    threads_cpy[3] = threads[3];
++    threads_cpy[4] = threads[4];
++    parents[0] = threads[0]->parent;
++    parents[1] = threads[1]->parent;
++    parents[2] = threads[2]->parent;
++    parents[3] = threads[3]->parent;
++    parents[4] = threads[4]->parent;
++    siblings[0] = threads[0]->children;
++    siblings[1] = threads[1]->sibling;
++    siblings[2] = threads[2]->sibling;
++    siblings[3] = threads[3]->sibling;
++    siblings[4] = threads[4]->sibling;
++    test_terminate_threads();
++    test_wait_threads();
++#if CH_CFG_THREADHIERARCHY_ORDERED == TRUE
++    test_assert(parents[0] == chThdGetSelfX() &&
++                parents[1] == threads_cpy[0] &&
++                parents[2] == threads_cpy[0] &&
++                parents[3] == threads_cpy[0] &&
++                parents[4] == threads_cpy[0] &&
++                siblings[0] == threads_cpy[1] &&
++                siblings[1] == threads_cpy[2] &&
++                siblings[2] == threads_cpy[3] &&
++                siblings[3] == threads_cpy[4] &&
++                siblings[4] == NULL, "invalid children list");
++#else
++    test_assert(parents[0] == chThdGetSelfX() &&
++                parents[1] == threads_cpy[0] &&
++                parents[2] == threads_cpy[0] &&
++                parents[3] == threads_cpy[0] &&
++                parents[4] == threads_cpy[0] &&
++                siblings[0] == threads_cpy[4] &&
++                siblings[4] == threads_cpy[3] &&
++                siblings[3] == threads_cpy[2] &&
++                siblings[2] == threads_cpy[1] &&
++                siblings[1] == NULL, "invalid children list");
++#endif
++  }
++
++  /* [3.5.3] Creating 1 parent and 4 child threads with identical priority,
++   * hierarchy information is tested.*/
++  test_set_step(3);
++  {
++    tprio_t prios[MAX_THREADS];
++    thread_t *threads_cpy[MAX_THREADS];
++    thread_t *parents[MAX_THREADS];
++    thread_t *siblings[MAX_THREADS];
++    prios[0] = chThdGetPriorityX()-1;
++    prios[1] = chThdGetPriorityX()-2;
++    prios[2] = chThdGetPriorityX()-2;
++    prios[3] = chThdGetPriorityX()-2;
++    prios[4] = chThdGetPriorityX()-2;
++    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, prios[0], hierarchythread, &prios[0], chThdGetSelfX());
++    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, prios[1], hierarchythread, &prios[1], threads[0]);
++    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, prios[2], hierarchythread, &prios[2], threads[0]);
++    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, prios[3], hierarchythread, &prios[3], threads[0]);
++    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, prios[4], hierarchythread, &prios[4], threads[0]);
++    threads_cpy[0] = threads[0];
++    threads_cpy[1] = threads[1];
++    threads_cpy[2] = threads[2];
++    threads_cpy[3] = threads[3];
++    threads_cpy[4] = threads[4];
++    parents[0] = threads[0]->parent;
++    parents[1] = threads[1]->parent;
++    parents[2] = threads[2]->parent;
++    parents[3] = threads[3]->parent;
++    parents[4] = threads[4]->parent;
++    siblings[0] = threads[0]->children;
++    siblings[1] = threads[1]->sibling;
++    siblings[2] = threads[2]->sibling;
++    siblings[3] = threads[3]->sibling;
++    siblings[4] = threads[4]->sibling;
++    test_terminate_threads();
++    test_wait_threads();
++    test_assert(parents[0] == chThdGetSelfX() &&
++                parents[1] == threads_cpy[0] &&
++                parents[2] == threads_cpy[0] &&
++                parents[3] == threads_cpy[0] &&
++                parents[4] == threads_cpy[0] &&
++                siblings[0] == threads_cpy[4] &&
++                siblings[1] == NULL &&
++                siblings[2] == threads_cpy[1] &&
++                siblings[3] == threads_cpy[2] &&
++                siblings[4] == threads_cpy[3] , "invalid children list");
++  }
++
++  /* [3.5.4] Creating 1 parent and 4 child threads with increasing priority
++   * which are terminated in a controlled manner, hierarchy information is
++   * tested.*/
++  test_set_step(4);
++  {
++    tprio_t prios[MAX_THREADS];
++    thread_t *threads_cpy[MAX_THREADS];
++    thread_t *parents[MAX_THREADS];
++    thread_t *siblings[MAX_THREADS];
++    prios[0] = chThdGetPriorityX()-1;
++    prios[1] = chThdGetPriorityX()-5;
++    prios[2] = chThdGetPriorityX()-4;
++    prios[3] = chThdGetPriorityX()-3;
++    prios[4] = chThdGetPriorityX()-2;
++    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, prios[0], hierarchythread, &prios[0], chThdGetSelfX());
++    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, prios[1], hierarchythread, &prios[1], threads[0]);
++    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, prios[2], hierarchythread, &prios[2], threads[0]);
++    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, prios[3], hierarchythread, &prios[3], threads[0]);
++    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, prios[4], hierarchythread, &prios[4], threads[0]);
++    threads_cpy[0] = threads[0];
++    threads_cpy[1] = threads[1];
++    threads_cpy[2] = threads[2];
++    threads_cpy[3] = threads[3];
++    threads_cpy[4] = threads[4];
++    chThdTerminate(threads[1]);
++    chThdTerminate(threads[4]);
++    chThdWait(threads[1]);
++    chThdWait(threads[4]);
++    parents[0] = threads[0]->parent;
++    parents[1] = threads[1]->parent;
++    parents[2] = threads[2]->parent;
++    parents[3] = threads[3]->parent;
++    parents[4] = threads[4]->parent;
++    siblings[0] = threads[0]->children;
++    siblings[1] = threads[1]->sibling;
++    siblings[2] = threads[2]->sibling;
++    siblings[3] = threads[3]->sibling;
++    siblings[4] = threads[4]->sibling;
++    test_terminate_threads();
++    test_wait_threads();
++    test_assert(parents[0] == chThdGetSelfX() &&
++                parents[2] == threads_cpy[0] &&
++                parents[3] == threads_cpy[0] &&
++                siblings[0] == threads_cpy[3] &&
++                siblings[2] == NULL &&
++                siblings[3] == threads_cpy[2], "invalid children list");
++  }
++
++  /* [3.5.5] Creating 1 parent and 4 child threads and then terminating the
++   * parent, hierarchy information is tested.*/
++  test_set_step(5);
++  {
++    tprio_t prios[MAX_THREADS];
++    thread_t *threads_cpy[MAX_THREADS];
++    thread_t *parents[MAX_THREADS];
++    uint8_t thdmask = 0;
++    prios[0] = chThdGetPriorityX()-1;
++    prios[1] = chThdGetPriorityX()-1;
++    prios[2] = chThdGetPriorityX()-1;
++    prios[3] = chThdGetPriorityX()-1;
++    prios[4] = chThdGetPriorityX()-1;
++    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, prios[0], hierarchythread, &prios[0], chThdGetSelfX());
++    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, prios[1], hierarchythread, &prios[1], threads[0]);
++    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, prios[2], hierarchythread, &prios[2], threads[0]);
++    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, prios[3], hierarchythread, &prios[3], threads[0]);
++    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, prios[4], hierarchythread, &prios[4], threads[0]);
++    threads_cpy[0] = threads[0];
++    threads_cpy[1] = threads[1];
++    threads_cpy[2] = threads[2];
++    threads_cpy[3] = threads[3];
++    threads_cpy[4] = threads[4];
++    chThdTerminate(threads[0]);
++    chThdWait(threads[0]);
++    parents[0] = threads_cpy[0]->parent;
++    parents[1] = threads_cpy[1]->parent;
++    parents[2] = threads_cpy[2]->parent;
++    parents[3] = threads_cpy[3]->parent;
++    parents[4] = threads_cpy[4]->parent;
++    for (thread_t* sibling = ch.mainthread.children; sibling != NULL; sibling = sibling->sibling) {
++      thdmask |= (sibling == threads[0]) ? 1 << 0 : 0;
++      thdmask |= (sibling == threads[1]) ? 1 << 1 : 0;
++      thdmask |= (sibling == threads[2]) ? 1 << 2 : 0;
++      thdmask |= (sibling == threads[3]) ? 1 << 3 : 0;
++      thdmask |= (sibling == threads[4]) ? 1 << 4 : 0;
++    }
++    test_terminate_threads();
++    test_wait_threads();
++    test_assert(parents[1] == &ch.mainthread &&
++                parents[2] == &ch.mainthread &&
++                parents[3] == &ch.mainthread &&
++                parents[4] == &ch.mainthread &&
++                thdmask == ((1 << 1) | (1 << 2) | (1 << 3) | (1 << 4)), "child thread recovery failed");
++  }
++
++  /* [3.5.6] Creating 1 parent and 4 child threads with increasing priority
++   * and then increasing the priority of a low-priority child, hierarchy
++   * information is tested.*/
++  test_set_step(6);
++  {
++    tprio_t prios[MAX_THREADS];
++    thread_t *threads_cpy[MAX_THREADS];
++    tprio_t testprios[2];
++    thread_t *siblings[MAX_THREADS];
++    prios[0] = chThdGetPriorityX()-1;
++    prios[1] = chThdGetPriorityX()-5;
++    prios[2] = chThdGetPriorityX()-4;
++    prios[3] = chThdGetPriorityX()-3;
++    prios[4] = chThdGetPriorityX()-2;
++    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, prios[0], hierarchythread, &prios[0], chThdGetSelfX());
++    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, prios[1], hierarchythread, &prios[1], threads[0]);
++    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, prios[2], hierarchythread, &prios[2], threads[0]);
++    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, prios[3], hierarchythread, &prios[3], threads[0]);
++    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, prios[4], hierarchythread, &prios[4], threads[0]);
++    threads_cpy[0] = threads[0];
++    threads_cpy[1] = threads[1];
++    threads_cpy[2] = threads[2];
++    threads_cpy[3] = threads[3];
++    threads_cpy[4] = threads[4];
++    chThdSleepMilliseconds(10);
++    testprios[0] = threads[1]->prio;
++    prios[1] = prios[4];
++    chThdSleepMilliseconds(10);
++    testprios[1] = threads[1]->prio;
++    siblings[0] = threads[0]->children;
++    siblings[1] = threads[1]->sibling;
++    siblings[2] = threads[2]->sibling;
++    siblings[3] = threads[3]->sibling;
++    siblings[4] = threads[4]->sibling;
++    test_terminate_threads();
++    test_wait_threads();
++#if CH_CFG_THREADHIERARCHY_ORDERED == TRUE
++    test_assert(testprios[0] == chThdGetPriorityX()-5 &&
++                testprios[1] == prios[4] &&
++                siblings[0] == threads_cpy[1] &&
++                siblings[1] == threads_cpy[4] &&
++                siblings[2] == NULL &&
++                siblings[3] == threads_cpy[2] &&
++                siblings[4] == threads_cpy[3], "invalid children list");
++#else
++    test_assert(testprios[0] == chThdGetPriorityX()-5 &&
++                testprios[1] == prios[4] &&
++                siblings[0] == threads_cpy[4] &&
++                siblings[1] == NULL &&
++                siblings[2] == threads_cpy[1] &&
++                siblings[3] == threads_cpy[2] &&
++                siblings[4] == threads_cpy[3], "invalid children list");
++#endif
++  }
++
++  /* [3.5.7] Creating 1 parent and 4 child threads with increasing priority
++   * and the decreasing the priority of a high-priority child, hierarchy
++   * information is tested.*/
++  test_set_step(7);
++  {
++    tprio_t prios[MAX_THREADS];
++    thread_t *threads_cpy[MAX_THREADS];
++    tprio_t testprios[2];
++    thread_t *siblings[MAX_THREADS];
++    prios[0] = chThdGetPriorityX()-1;
++    prios[1] = chThdGetPriorityX()-5;
++    prios[2] = chThdGetPriorityX()-4;
++    prios[3] = chThdGetPriorityX()-3;
++    prios[4] = chThdGetPriorityX()-2;
++    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, prios[0], hierarchythread, &prios[0], chThdGetSelfX());
++    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, prios[1], hierarchythread, &prios[1], threads[0]);
++    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, prios[2], hierarchythread, &prios[2], threads[0]);
++    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, prios[3], hierarchythread, &prios[3], threads[0]);
++    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, prios[4], hierarchythread, &prios[4], threads[0]);
++    threads_cpy[0] = threads[0];
++    threads_cpy[1] = threads[1];
++    threads_cpy[2] = threads[2];
++    threads_cpy[3] = threads[3];
++    threads_cpy[4] = threads[4];
++    chThdSleepMilliseconds(10);
++    testprios[0] = threads[4]->prio;
++    prios[4] = prios[1];
++    chThdSleepMilliseconds(10);
++    testprios[1] = threads[4]->prio;
++    siblings[0] = threads[0]->children;
++    siblings[1] = threads[1]->sibling;
++    siblings[2] = threads[2]->sibling;
++    siblings[3] = threads[3]->sibling;
++    siblings[4] = threads[4]->sibling;
++    test_terminate_threads();
++    test_wait_threads();
++#if CH_CFG_THREADHIERARCHY_ORDERED == TRUE
++    test_assert(testprios[0] == chThdGetPriorityX()-2 &&
++                testprios[1] == prios[1] &&
++                siblings[0] == threads_cpy[3] &&
++                siblings[1] == NULL &&
++                siblings[2] == threads_cpy[4] &&
++                siblings[3] == threads_cpy[2] &&
++                siblings[4] == threads_cpy[1], "invalid children list");
++#else
++    test_assert(testprios[0] == chThdGetPriorityX()-2 &&
++                testprios[1] == prios[1] &&
++                siblings[0] == threads_cpy[4] &&
++                siblings[1] == NULL &&
++                siblings[2] == threads_cpy[1] &&
++                siblings[3] == threads_cpy[2] &&
++                siblings[4] == threads_cpy[3], "invalid children list");
++#endif
++  }
++}
++
++
++static const testcase_t rt_test_003_005 = {
++#if CH_CFG_THREADHIERARCHY_ORDERED == TRUE
++  "Thread hierarchy with ordered lists",
++#else
++  "Thread hierarchy with unordered lists",
++#endif
++  NULL,
++  NULL,
++  rt_test_003_005_execute
++};
++#endif /* CH_CFG_USE_THREADHIERARCHY */
++
+ /****************************************************************************
+  * Exported data.
+  ****************************************************************************/
+@@ -339,6 +752,9 @@ const testcase_t * const rt_test_sequence_003_array[] = {
+ #if (CH_CFG_USE_MUTEXES) || defined(__DOXYGEN__)
+   &rt_test_003_004,
+ #endif
++#if (CH_CFG_USE_THREADHIERARCHY) || defined(__DOXYGEN__)
++  &rt_test_003_005,
++#endif
+   NULL
+ };
+ 
+diff --git a/test/rt/source/test/rt_test_sequence_004.c b/test/rt/source/test/rt_test_sequence_004.c
+index 7ad2ab5..4226ffc 100644
+--- a/test/rt/source/test/rt_test_sequence_004.c
++++ b/test/rt/source/test/rt_test_sequence_004.c
+@@ -83,7 +83,7 @@ static void rt_test_004_001_execute(void) {
+      and the state of the reference are tested.*/
+   test_set_step(1);
+   {
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX()-1, thread1, "A");
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX()-1, thread1, "A");
+     chSysLock();
+     msg = chThdSuspendTimeoutS(&tr1, TIME_INFINITE);
+     chSysUnlock();
+diff --git a/test/rt/source/test/rt_test_sequence_005.c b/test/rt/source/test/rt_test_sequence_005.c
+index 29cebb9..3cde985 100644
+--- a/test/rt/source/test/rt_test_sequence_005.c
++++ b/test/rt/source/test/rt_test_sequence_005.c
+@@ -178,11 +178,11 @@ static void rt_test_005_002_execute(void) {
+      initialized to zero.*/
+   test_set_step(1);
+   {
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX()+5, thread1, "A");
+-    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, chThdGetPriorityX()+1, thread1, "B");
+-    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, chThdGetPriorityX()+3, thread1, "C");
+-    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, chThdGetPriorityX()+4, thread1, "D");
+-    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, chThdGetPriorityX()+2, thread1, "E");
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX()+5, thread1, "A");
++    threads[1] = test_create_thread(wa[1], WA_SIZE, chThdGetPriorityX()+1, thread1, "B");
++    threads[2] = test_create_thread(wa[2], WA_SIZE, chThdGetPriorityX()+3, thread1, "C");
++    threads[3] = test_create_thread(wa[3], WA_SIZE, chThdGetPriorityX()+4, thread1, "D");
++    threads[4] = test_create_thread(wa[4], WA_SIZE, chThdGetPriorityX()+2, thread1, "E");
+   }
+ 
+   /* [5.2.2] The semaphore is signaled 5 times. The thread activation
+@@ -248,7 +248,7 @@ static void rt_test_005_003_execute(void) {
+   /* [5.3.2] Testing non-timeout condition.*/
+   test_set_step(2);
+   {
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX() - 1,
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX() - 1,
+                                    thread2, 0);
+     msg = chSemWaitTimeout(&sem1, TIME_MS2I(500));
+     test_wait_threads();
+@@ -305,7 +305,7 @@ static void rt_test_005_004_execute(void) {
+   /* [5.4.1] A thread is created, it goes to wait on the semaphore.*/
+   test_set_step(1);
+   {
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX()+1, thread1, "A");
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX()+1, thread1, "A");
+   }
+ 
+   /* [5.4.2] The semaphore counter is increased by two, it is then
+@@ -366,7 +366,7 @@ static void rt_test_005_005_execute(void) {
+      non-atomical wait and signal operations on a semaphore.*/
+   test_set_step(1);
+   {
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX()+1, thread3, 0);
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX()+1, thread3, 0);
+   }
+ 
+   /* [5.5.2] The function chSemSignalWait() is invoked by specifying
+@@ -448,7 +448,7 @@ static void rt_test_005_006_execute(void) {
+   /* [5.6.3] Starting a signaler thread at a lower priority.*/
+   test_set_step(3);
+   {
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE,
++    threads[0] = test_create_thread(wa[0], WA_SIZE,
+                                    chThdGetPriorityX()-1, thread4, &bsem);
+   }
+ 
+diff --git a/test/rt/source/test/rt_test_sequence_006.c b/test/rt/source/test/rt_test_sequence_006.c
+index 3694755..4d50caa 100644
+--- a/test/rt/source/test/rt_test_sequence_006.c
++++ b/test/rt/source/test/rt_test_sequence_006.c
+@@ -276,11 +276,11 @@ static void rt_test_006_001_execute(void) {
+      priority order.*/
+   test_set_step(3);
+   {
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, prio+1, thread1, "E");
+-    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, prio+2, thread1, "D");
+-    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, prio+3, thread1, "C");
+-    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, prio+4, thread1, "B");
+-    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, prio+5, thread1, "A");
++    threads[0] = test_create_thread(wa[0], WA_SIZE, prio+1, thread1, "E");
++    threads[1] = test_create_thread(wa[1], WA_SIZE, prio+2, thread1, "D");
++    threads[2] = test_create_thread(wa[2], WA_SIZE, prio+3, thread1, "C");
++    threads[3] = test_create_thread(wa[3], WA_SIZE, prio+4, thread1, "B");
++    threads[4] = test_create_thread(wa[4], WA_SIZE, prio+5, thread1, "A");
+   }
+ 
+   /* [6.1.4] Unlocking the mutex, the threads will wakeup in priority
+@@ -347,9 +347,9 @@ static void rt_test_006_002_execute(void) {
+      complete in priority order.*/
+   test_set_step(2);
+   {
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX()-1, thread2H, 0);
+-    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, chThdGetPriorityX()-2, thread2M, 0);
+-    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, chThdGetPriorityX()-3, thread2L, 0);
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX()-1, thread2H, 0);
++    threads[1] = test_create_thread(wa[1], WA_SIZE, chThdGetPriorityX()-2, thread2M, 0);
++    threads[2] = test_create_thread(wa[2], WA_SIZE, chThdGetPriorityX()-3, thread2L, 0);
+     test_wait_threads();
+     test_assert_sequence("ABC", "invalid sequence");
+   }
+@@ -418,11 +418,11 @@ static void rt_test_006_003_execute(void) {
+      complete in priority order.*/
+   test_set_step(2);
+   {
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX()-5, thread3LL, 0);
+-    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, chThdGetPriorityX()-4, thread3L, 0);
+-    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, chThdGetPriorityX()-3, thread3M, 0);
+-    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, chThdGetPriorityX()-2, thread3H, 0);
+-    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, chThdGetPriorityX()-1, thread3HH, 0);
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX()-5, thread3LL, 0);
++    threads[1] = test_create_thread(wa[1], WA_SIZE, chThdGetPriorityX()-4, thread3L, 0);
++    threads[2] = test_create_thread(wa[2], WA_SIZE, chThdGetPriorityX()-3, thread3M, 0);
++    threads[3] = test_create_thread(wa[3], WA_SIZE, chThdGetPriorityX()-2, thread3H, 0);
++    threads[4] = test_create_thread(wa[4], WA_SIZE, chThdGetPriorityX()-1, thread3HH, 0);
+     test_wait_threads();
+     test_assert_sequence("ABCDE", "invalid sequence");
+   }
+@@ -501,8 +501,8 @@ static void rt_test_006_004_execute(void) {
+   /* [6.4.2] Spawning threads A and B at priorities P(A) and P(B).*/
+   test_set_step(2);
+   {
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, pa, thread4A, "A");
+-    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, pb, thread4B, "B");
++    threads[0] = test_create_thread(wa[0], WA_SIZE, pa, thread4A, "A");
++    threads[1] = test_create_thread(wa[1], WA_SIZE, pb, thread4B, "B");
+   }
+ 
+   /* [6.4.3] Locking the mutex M1 before thread A has a chance to lock
+@@ -839,11 +839,11 @@ static void rt_test_006_007_execute(void) {
+   test_set_step(1);
+   {
+     tprio_t prio = chThdGetPriorityX();
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, prio+1, thread6, "E");
+-    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, prio+2, thread6, "D");
+-    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, prio+3, thread6, "C");
+-    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, prio+4, thread6, "B");
+-    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, prio+5, thread6, "A");
++    threads[0] = test_create_thread(wa[0], WA_SIZE, prio+1, thread6, "E");
++    threads[1] = test_create_thread(wa[1], WA_SIZE, prio+2, thread6, "D");
++    threads[2] = test_create_thread(wa[2], WA_SIZE, prio+3, thread6, "C");
++    threads[3] = test_create_thread(wa[3], WA_SIZE, prio+4, thread6, "B");
++    threads[4] = test_create_thread(wa[4], WA_SIZE, prio+5, thread6, "A");
+   }
+ 
+   /* [6.7.2] Atomically signaling the condition variable five times
+@@ -908,11 +908,11 @@ static void rt_test_006_008_execute(void) {
+   test_set_step(1);
+   {
+     tprio_t prio = chThdGetPriorityX();
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, prio+1, thread6, "E");
+-    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, prio+2, thread6, "D");
+-    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, prio+3, thread6, "C");
+-    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, prio+4, thread6, "B");
+-    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, prio+5, thread6, "A");
++    threads[0] = test_create_thread(wa[0], WA_SIZE, prio+1, thread6, "E");
++    threads[1] = test_create_thread(wa[1], WA_SIZE, prio+2, thread6, "D");
++    threads[2] = test_create_thread(wa[2], WA_SIZE, prio+3, thread6, "C");
++    threads[3] = test_create_thread(wa[3], WA_SIZE, prio+4, thread6, "B");
++    threads[4] = test_create_thread(wa[4], WA_SIZE, prio+5, thread6, "A");
+   }
+ 
+   /* [6.8.2] Broarcasting on the condition variable then waiting for
+@@ -986,21 +986,21 @@ static void rt_test_006_009_execute(void) {
+      M1 and goes to wait on C1.*/
+   test_set_step(2);
+   {
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, prio+1, thread8, "A");
++    threads[0] = test_create_thread(wa[0], WA_SIZE, prio+1, thread8, "A");
+   }
+ 
+   /* [6.9.3] Thread C is created at priority P(+2), it enqueues on M1
+      and boosts TA priority at P(+2).*/
+   test_set_step(3);
+   {
+-    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, prio+2, thread6, "C");
++    threads[1] = test_create_thread(wa[1], WA_SIZE, prio+2, thread6, "C");
+   }
+ 
+   /* [6.9.4] Thread B is created at priority P(+3), it enqueues on M2
+      and boosts TA priority at P(+3).*/
+   test_set_step(4);
+   {
+-    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, prio+3, thread9, "B");
++    threads[2] = test_create_thread(wa[2], WA_SIZE, prio+3, thread9, "B");
+   }
+ 
+   /* [6.9.5] Signaling C1: TA wakes up, unlocks M1 and priority goes to
+diff --git a/test/rt/source/test/rt_test_sequence_007.c b/test/rt/source/test/rt_test_sequence_007.c
+index 62a9df9..6dabea2 100644
+--- a/test/rt/source/test/rt_test_sequence_007.c
++++ b/test/rt/source/test/rt_test_sequence_007.c
+@@ -79,7 +79,7 @@ static void rt_test_007_001_execute(void) {
+   /* [7.1.1] Starting the messenger thread.*/
+   test_set_step(1);
+   {
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX() + 1,
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX() + 1,
+                                    msg_thread1, chThdGetSelfX());
+   }
+ 
+diff --git a/test/rt/source/test/rt_test_sequence_008.c b/test/rt/source/test/rt_test_sequence_008.c
+index d2bb805..cead16b 100644
+--- a/test/rt/source/test/rt_test_sequence_008.c
++++ b/test/rt/source/test/rt_test_sequence_008.c
+@@ -226,7 +226,7 @@ static void rt_test_008_003_execute(void) {
+   test_set_step(3);
+   {
+     target_time = chTimeAddX(test_wait_tick(), TIME_MS2I(50));
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX() - 1,
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX() - 1,
+                                    evt_thread3, chThdGetSelfX());
+   }
+ 
+@@ -300,7 +300,7 @@ static void rt_test_008_004_execute(void) {
+   test_set_step(3);
+   {
+     target_time = chTimeAddX(test_wait_tick(), TIME_MS2I(50));
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX() - 1,
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX() - 1,
+                                    evt_thread3, chThdGetSelfX());
+   }
+ 
+@@ -381,7 +381,7 @@ static void rt_test_008_005_execute(void) {
+   test_set_step(4);
+   {
+     target_time = chTimeAddX(test_wait_tick(), TIME_MS2I(50));
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX() - 1,
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX() - 1,
+                                    evt_thread3, chThdGetSelfX());
+   }
+ 
+@@ -514,7 +514,7 @@ static void rt_test_008_007_execute(void) {
+   test_set_step(2);
+   {
+     target_time = chTimeAddX(test_wait_tick(), TIME_MS2I(50));
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX() - 1,
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX() - 1,
+                                    evt_thread7, "A");
+   }
+ 
+diff --git a/test/rt/source/test/rt_test_sequence_010.c b/test/rt/source/test/rt_test_sequence_010.c
+index 1c77343..e21c840 100644
+--- a/test/rt/source/test/rt_test_sequence_010.c
++++ b/test/rt/source/test/rt_test_sequence_010.c
+@@ -169,7 +169,7 @@ static void rt_test_010_001_execute(void) {
+      the current thread.*/
+   test_set_step(1);
+   {
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX()-1, bmk_thread1, NULL);
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX()-1, bmk_thread1, NULL);
+   }
+ 
+   /* [10.1.2] The number of messages exchanged is counted in a one
+@@ -230,7 +230,7 @@ static void rt_test_010_002_execute(void) {
+      than the current thread.*/
+   test_set_step(1);
+   {
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX()+1, bmk_thread1, NULL);
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX()+1, bmk_thread1, NULL);
+   }
+ 
+   /* [10.2.2] The number of messages exchanged is counted in a one
+@@ -294,17 +294,17 @@ static void rt_test_010_003_execute(void) {
+      than the current thread.*/
+   test_set_step(1);
+   {
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX()+1, bmk_thread1, NULL);
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX()+1, bmk_thread1, NULL);
+   }
+ 
+   /* [10.3.2] Four threads are started at a lower priority than the
+      current thread.*/
+   test_set_step(2);
+   {
+-    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, chThdGetPriorityX()-2, bmk_thread3, NULL);
+-    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, chThdGetPriorityX()-3, bmk_thread3, NULL);
+-    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, chThdGetPriorityX()-4, bmk_thread3, NULL);
+-    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, chThdGetPriorityX()-5, bmk_thread3, NULL);
++    threads[1] = test_create_thread(wa[1], WA_SIZE, chThdGetPriorityX()-2, bmk_thread3, NULL);
++    threads[2] = test_create_thread(wa[2], WA_SIZE, chThdGetPriorityX()-3, bmk_thread3, NULL);
++    threads[3] = test_create_thread(wa[3], WA_SIZE, chThdGetPriorityX()-4, bmk_thread3, NULL);
++    threads[4] = test_create_thread(wa[4], WA_SIZE, chThdGetPriorityX()-5, bmk_thread3, NULL);
+   }
+ 
+   /* [10.3.3] The number of messages exchanged is counted in a one
+@@ -360,7 +360,7 @@ static void rt_test_010_004_execute(void) {
+   /* [10.4.1] Starting the target thread at an higher priority level.*/
+   test_set_step(1);
+   {
+-    tp = threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX()+1,
++    tp = threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX()+1,
+                                         bmk_thread4, NULL);
+   }
+ 
+@@ -444,7 +444,7 @@ static void rt_test_010_005_execute(void) {
+     start = test_wait_tick();
+     end = chTimeAddX(start, TIME_MS2I(1000));
+     do {
+-      chThdWait(chThdCreateStatic(wa[0], WA_SIZE, prio, bmk_thread3, NULL));
++      chThdWait(test_create_thread(wa[0], WA_SIZE, prio, bmk_thread3, NULL));
+       n++;
+ #if defined(SIMULATOR)
+       _sim_check_for_interrupts();
+@@ -502,9 +502,9 @@ static void rt_test_010_006_execute(void) {
+     end = chTimeAddX(start, TIME_MS2I(1000));
+     do {
+ #if CH_CFG_USE_REGISTRY
+-      chThdRelease(chThdCreateStatic(wa[0], WA_SIZE, prio, bmk_thread3, NULL));
++      chThdRelease(test_create_thread(wa[0], WA_SIZE, prio, bmk_thread3, NULL));
+ #else
+-      chThdCreateStatic(wa[0], WA_SIZE, prio, bmk_thread3, NULL);
++      test_create_thread(wa[0], WA_SIZE, prio, bmk_thread3, NULL);
+ #endif
+       n++;
+ #if defined(SIMULATOR)
+@@ -566,11 +566,11 @@ static void rt_test_010_007_execute(void) {
+      immediately enqueue on a semaphore.*/
+   test_set_step(1);
+   {
+-    threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX()+5, bmk_thread7, NULL);
+-    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, chThdGetPriorityX()+4, bmk_thread7, NULL);
+-    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, chThdGetPriorityX()+3, bmk_thread7, NULL);
+-    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, chThdGetPriorityX()+2, bmk_thread7, NULL);
+-    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, chThdGetPriorityX()+1, bmk_thread7, NULL);
++    threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX()+5, bmk_thread7, NULL);
++    threads[1] = test_create_thread(wa[1], WA_SIZE, chThdGetPriorityX()+4, bmk_thread7, NULL);
++    threads[2] = test_create_thread(wa[2], WA_SIZE, chThdGetPriorityX()+3, bmk_thread7, NULL);
++    threads[3] = test_create_thread(wa[3], WA_SIZE, chThdGetPriorityX()+2, bmk_thread7, NULL);
++    threads[4] = test_create_thread(wa[4], WA_SIZE, chThdGetPriorityX()+1, bmk_thread7, NULL);
+   }
+ 
+   /* [10.7.2] The semaphore is reset waking up the five threads. The
+@@ -645,12 +645,12 @@ static void rt_test_010_008_execute(void) {
+   test_set_step(1);
+   {
+     n = 0;
+-    test_wait_tick();threads[0] = chThdCreateStatic(wa[0], WA_SIZE, chThdGetPriorityX()-1, bmk_thread8, (void *)&n);
++    test_wait_tick();threads[0] = test_create_thread(wa[0], WA_SIZE, chThdGetPriorityX()-1, bmk_thread8, (void *)&n);
+ 
+-    threads[1] = chThdCreateStatic(wa[1], WA_SIZE, chThdGetPriorityX()-1, bmk_thread8, (void *)&n);
+-    threads[2] = chThdCreateStatic(wa[2], WA_SIZE, chThdGetPriorityX()-1, bmk_thread8, (void *)&n);
+-    threads[3] = chThdCreateStatic(wa[3], WA_SIZE, chThdGetPriorityX()-1, bmk_thread8, (void *)&n);
+-    threads[4] = chThdCreateStatic(wa[4], WA_SIZE, chThdGetPriorityX()-1, bmk_thread8, (void *)&n);
++    threads[1] = test_create_thread(wa[1], WA_SIZE, chThdGetPriorityX()-1, bmk_thread8, (void *)&n);
++    threads[2] = test_create_thread(wa[2], WA_SIZE, chThdGetPriorityX()-1, bmk_thread8, (void *)&n);
++    threads[3] = test_create_thread(wa[3], WA_SIZE, chThdGetPriorityX()-1, bmk_thread8, (void *)&n);
++    threads[4] = test_create_thread(wa[4], WA_SIZE, chThdGetPriorityX()-1, bmk_thread8, (void *)&n);
+   }
+ 
+   /* [10.8.2] Waiting one second then terminating the 5 threads.*/

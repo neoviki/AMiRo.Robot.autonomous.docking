@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" contentScriptType="application/ecmascript" contentStyleType="text/css" height="380px" preserveAspectRatio="none" style="width:339px;height:380px;" version="1.1" viewBox="0 0 339 380" width="339px" zoomAndPan="magnify"><defs><filter height="300%" id="f1ww39hvskbohc" width="300%" x="-1" y="-1"><feGaussianBlur result="blurOut" stdDeviation="2.0"/><feColorMatrix in="blurOut" result="blurOut2" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .4 0"/><feOffset dx="4.0" dy="4.0" in="blurOut2" result="blurOut3"/><feBlend in="SourceGraphic" in2="blurOut3" mode="normal"/></filter></defs><g><!--cluster AMiRoBLT_node--><polygon fill="#FFFFFF" filter="url(#f1ww39hvskbohc)" points="22,34,32,24,317,24,317,358,307,368,22,368,22,34" style="stroke: #000000; stroke-width: 1.5;"/><line style="stroke: #000000; stroke-width: 1.5;" x1="307" x2="316" y1="34" y2="25"/><line style="stroke: #000000; stroke-width: 1.5;" x1="22" x2="307" y1="34" y2="34"/><line style="stroke: #000000; stroke-width: 1.5;" x1="307" x2="307" y1="34" y2="368"/><text fill="#000000" font-family="sans-serif" font-size="14" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="83" x="124" y="49.9951">AMiRo-BLT</text><!--entity OpenBLT--><rect fill="#D3D3D3" filter="url(#f1ww39hvskbohc)" height="46.2969" style="stroke: #A80036; stroke-width: 1.5;" width="104" x="38" y="306"/><rect fill="#D3D3D3" height="10" style="stroke: #A80036; stroke-width: 1.5;" width="15" x="122" y="311"/><rect fill="#D3D3D3" height="2" style="stroke: #A80036; stroke-width: 1.5;" width="4" x="120" y="313"/><rect fill="#D3D3D3" height="2" style="stroke: #A80036; stroke-width: 1.5;" width="4" x="120" y="317"/><text fill="#000000" font-family="sans-serif" font-size="14" lengthAdjust="spacingAndGlyphs" textLength="64" x="53" y="338.9951">OpenBLT</text><!--entity STM32Flash--><rect fill="#D3D3D3" filter="url(#f1ww39hvskbohc)" height="46.2969" style="stroke: #A80036; stroke-width: 1.5;" width="124" x="177" y="306"/><rect fill="#D3D3D3" height="10" style="stroke: #A80036; stroke-width: 1.5;" width="15" x="281" y="311"/><rect fill="#D3D3D3" height="2" style="stroke: #A80036; stroke-width: 1.5;" width="4" x="279" y="313"/><rect fill="#D3D3D3" height="2" style="stroke: #A80036; stroke-width: 1.5;" width="4" x="279" y="317"/><text fill="#000000" font-family="sans-serif" font-size="14" lengthAdjust="spacingAndGlyphs" textLength="84" x="192" y="338.9951">STM32Flash</text><!--entity amiroblt.h--><ellipse cx="129" cy="93" fill="#FEFECE" filter="url(#f1ww39hvskbohc)" rx="8" ry="8" style="stroke: #A80036; stroke-width: 2.0;"/><text fill="#000000" font-family="sans-serif" font-size="14" lengthAdjust="spacingAndGlyphs" textLength="68" x="95" y="122.9951">amiroblt.h</text><!--entity AMiRoBLT--><rect fill="#FEFECE" filter="url(#f1ww39hvskbohc)" height="46.2969" style="stroke: #A80036; stroke-width: 1.5;" width="114" x="72" y="183"/><rect fill="#FEFECE" height="10" style="stroke: #A80036; stroke-width: 1.5;" width="15" x="166" y="188"/><rect fill="#FEFECE" height="2" style="stroke: #A80036; stroke-width: 1.5;" width="4" x="164" y="190"/><rect fill="#FEFECE" height="2" style="stroke: #A80036; stroke-width: 1.5;" width="4" x="164" y="194"/><text fill="#000000" font-family="sans-serif" font-size="14" lengthAdjust="spacingAndGlyphs" textLength="74" x="87" y="215.9951">AMiRo-BLT</text><!--link AMiRoBLT to OpenBLT--><path d="M121.847,229.193 C116.679,245.226 109.546,267.357 103.3406,286.6099 " fill="none" id="AMiRoBLT-OpenBLT" style="stroke: #A80036; stroke-width: 1.0;"/><polygon fill="none" points="109.906,289.0592,97.1079,305.9474,96.5809,284.7643,109.906,289.0592" style="stroke: #A80036; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="31" x="113" y="272.0669">forks</text><!--link AMiRoBLT to STM32Flash--><path d="M149.176,229.193 C167.86,249.746 195.654,280.319 215.369,302.0059 " fill="none" id="AMiRoBLT-STM32Flash" style="stroke: #A80036; stroke-width: 1.0; stroke-dasharray: 7.0,7.0;"/><polygon fill="#A80036" points="218.952,305.9474,215.858,296.5972,215.5887,302.2476,209.9383,301.9784,218.952,305.9474" style="stroke: #A80036; stroke-width: 1.0;"/><text fill="#000000" font-family="sans-serif" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="44" x="191" y="272.0669">utilizes</text><!--link amiroblt.h to AMiRoBLT--><path d="M129,102.343 C129,119.284 129,158.2 129,182.954 " fill="none" id="amiroblt.h-AMiRoBLT" style="stroke: #A80036; stroke-width: 1.0;"/><!--
+@startuml
+skinparam componentStyle uml2
+
+
+node "AMiRo-BLT" as AMiRoBLT_node {
+	component OpenBLT #lightgrey
+	component STM32Flash #lightgrey
+
+	interface amiroblt.h
+
+	component "AMiRo-BLT" as AMiRoBLT
+	AMiRoBLT -down-|> OpenBLT : forks
+	AMiRoBLT .down.> STM32Flash : utilizes
+	AMiRoBLT -up- amiroblt.h
+}
+
+@enduml
+
+PlantUML version 1.2018.11(Sat Sep 22 18:43:53 CEST 2018)
+(GPL source distribution)
+Java Runtime: OpenJDK Runtime Environment
+JVM: OpenJDK 64-Bit Server VM
+Java Version: 1.8.0_181-8u181-b13-1ubuntu0.16.04.1-b13
+Operating System: Linux
+OS Version: 4.15.0-38-generic
+Default Encoding: UTF-8
+Language: en
+Country: US
+--></g></svg>

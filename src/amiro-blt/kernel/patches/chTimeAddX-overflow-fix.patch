@@ -1,0 +1,20 @@
+diff --git a/os/rt/include/chtime.h b/os/rt/include/chtime.h
+index c975d10..99ce8d8 100644
+--- a/os/rt/include/chtime.h
++++ b/os/rt/include/chtime.h
+@@ -472,11 +472,11 @@ static inline time_usecs_t chTimeI2US(sysinterval_t interval) {
+ static inline systime_t chTimeAddX(systime_t systime,
+                                    sysinterval_t interval) {
+ 
+-#if CH_CFG_ST_RESOLUTION != CH_CFG_INTERVALS_SIZE
+-  chDbgCheck(interval <= (sysinterval_t)((systime_t)-1));
++#if CH_CFG_ST_RESOLUTION < CH_CFG_INTERVALS_SIZE
++  return  systime + (systime_t)(interval % ((sysinterval_t)1 << CH_CFG_ST_RESOLUTION));
++#else
++  return systime + interval;
+ #endif
+-
+-  return systime + (systime_t)interval;
+ }
+ 
+ /**

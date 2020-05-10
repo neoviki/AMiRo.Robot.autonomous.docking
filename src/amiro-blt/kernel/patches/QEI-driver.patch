@@ -1,0 +1,994 @@
+diff --git a/os/hal/hal.mk b/os/hal/hal.mk
+index f177a3f..64d96d9 100644
+--- a/os/hal/hal.mk
++++ b/os/hal/hal.mk
+@@ -41,6 +41,9 @@ endif
+ ifneq ($(findstring HAL_USE_ICU TRUE,$(HALCONF)),)
+ HALSRC += $(CHIBIOS)/os/hal/src/hal_icu.c
+ endif
++ifneq ($(findstring HAL_USE_QEI TRUE,$(HALCONF)),)
++HALSRC += $(CHIBIOS)/os/hal/src/hal_qei.c
++endif
+ ifneq ($(findstring HAL_USE_MAC TRUE,$(HALCONF)),)
+ HALSRC += $(CHIBIOS)/os/hal/src/hal_mac.c
+ endif
+@@ -94,6 +97,7 @@ HALSRC = $(CHIBIOS)/os/hal/src/hal.c \
+          $(CHIBIOS)/os/hal/src/hal_i2c.c \
+          $(CHIBIOS)/os/hal/src/hal_i2s.c \
+          $(CHIBIOS)/os/hal/src/hal_icu.c \
++         $(CHIBIOS)/os/hal/src/hal_qei.c \
+          $(CHIBIOS)/os/hal/src/hal_mac.c \
+          $(CHIBIOS)/os/hal/src/hal_mmc_spi.c \
+          $(CHIBIOS)/os/hal/src/hal_pal.c \
+diff --git a/os/hal/include/hal.h b/os/hal/include/hal.h
+index 79f7c42..8cf221f 100644
+--- a/os/hal/include/hal.h
++++ b/os/hal/include/hal.h
+@@ -78,6 +78,10 @@
+ #define HAL_USE_PWM                         FALSE
+ #endif
+ 
++#if !defined(HAL_USE_QEI)
++#define HAL_USE_QEI                         FALSE
++#endif
++
+ #if !defined(HAL_USE_QSPI)
+ #define HAL_USE_QSPI                        FALSE
+ #endif
+@@ -138,6 +142,7 @@
+ #include "hal_icu.h"
+ #include "hal_mac.h"
+ #include "hal_pwm.h"
++#include "hal_qei.h"
+ #include "hal_qspi.h"
+ #include "hal_rtc.h"
+ #include "hal_serial.h"
+diff --git a/os/hal/include/hal_qei.h b/os/hal/include/hal_qei.h
+new file mode 100644
+index 0000000..8769729
+--- /dev/null
++++ b/os/hal/include/hal_qei.h
+@@ -0,0 +1,148 @@
++/*
++AMiRo-OS is an operating system designed for the Autonomous Mini Robot (AMiRo) platform.
++Copyright (C) 2016..2018  Thomas Schöpping et al.
++
++This program is free software: you can redistribute it and/or modify
++it under the terms of the GNU General Public License as published by
++the Free Software Foundation, either version 3 of the License, or
++(at your option) any later version.
++
++This program is distributed in the hope that it will be useful,
++but WITHOUT ANY WARRANTY; without even the implied warranty of
++MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++GNU General Public License for more details.
++
++You should have received a copy of the GNU General Public License
++along with this program.  If not, see <http://www.gnu.org/licenses/>.
++*/
++
++/**
++ * @file    hal_qei.h
++ * @brief   QEI Driver macros and structures.
++ *
++ * @addtogroup QEI
++ * @{
++ */
++
++#ifndef HAL_QEI_H
++#define HAL_QEI_H
++
++#if (HAL_USE_QEI == TRUE) || defined(__DOXYGEN__)
++
++/*===========================================================================*/
++/* Driver constants.                                                         */
++/*===========================================================================*/
++
++/*===========================================================================*/
++/* Driver pre-compile time settings.                                         */
++/*===========================================================================*/
++
++/*===========================================================================*/
++/* Derived constants and error checks.                                       */
++/*===========================================================================*/
++
++/*===========================================================================*/
++/* Driver data structures and types.                                         */
++/*===========================================================================*/
++
++/**
++ * @brief   Driver state machine possible states.
++ */
++typedef enum {
++  QEI_UNINIT = 0,                   /**< Not initialized.                   */
++  QEI_STOP = 1,                     /**< Stopped.                           */
++  QEI_READY = 2,                    /**< Ready.                             */
++  QEI_ACTIVE = 4,                   /**< Active.                            */
++} qeistate_t;
++
++/**
++ * @brief   Type of a structure representing an QEI driver.
++ */
++typedef struct QEIDriver QEIDriver;
++
++#include "hal_qei_lld.h"
++
++/*===========================================================================*/
++/* Driver macros.                                                            */
++/*===========================================================================*/
++
++/**
++ * @name    Macro Functions
++ * @{
++ */
++/**
++ * @brief   Enables the quadrature encoder.
++ *
++ * @param[in] qeip      pointer to the @p QEIDriver object
++ *
++ * @iclass
++ */
++#define qeiEnableI(qeip) qei_lld_enable(qeip)
++
++/**
++ * @brief   Disables the quadrature encoder.
++ *
++ * @param[in] qeip      pointer to the @p QEIDriver object
++ *
++ * @iclass
++ */
++#define qeiDisableI(qeip) qei_lld_disable(qeip)
++
++/**
++ * @brief   Returns the direction of the last transition.
++ * @details The direction is defined as boolean and is
++ *          calculated at each transition on any input.
++ *
++ * @param[in] qeip      pointer to the @p QEIDriver object
++ * @return              The request direction.
++ * @retval FALSE        Position counted up.
++ * @retval TRUE         Position counted down.
++ * @iclass
++ */
++#define qeiGetDirectionI(qeip) qei_lld_get_direction(qeip)
++
++/**
++ * @brief   Returns the position of the encoder.
++ * @details The position is defined as number of pulses since last reset.
++ *
++ * @param[in] qeip      pointer to the @p QEIDriver object
++ * @return              The number of pulses.
++ *
++ * @iclass
++ */
++#define qeiGetPositionI(qeip) qei_lld_get_position(qeip)
++
++/**
++ * @brief   Returns the range of the encoder.
++ * @details The range is defined as number of maximum pulse count.
++ *
++ * @param[in] qeip      pointer to the @p QEIDriver object
++ * @return              The number of pulses.
++ *
++ * @iclass
++ */
++#define qeiGetRangeI(qeip) qei_lld_get_range(qeip)
++/** @} */
++
++/*===========================================================================*/
++/* External declarations.                                                    */
++/*===========================================================================*/
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++  void qeiInit(void);
++  void qeiObjectInit(QEIDriver *qeip);
++  void qeiStart(QEIDriver *qeip, const QEIConfig *config);
++  void qeiStop(QEIDriver *qeip);
++  void qeiEnable(QEIDriver *qeip);
++  void qeiDisable(QEIDriver *qeip);
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* HAL_USE_QEI */
++
++#endif /* HAL_QEI_H */
++
++/** @} */
+diff --git a/os/hal/ports/STM32/LLD/TIMv1/driver.mk b/os/hal/ports/STM32/LLD/TIMv1/driver.mk
+index 032d75a..13e3571 100644
+--- a/os/hal/ports/STM32/LLD/TIMv1/driver.mk
++++ b/os/hal/ports/STM32/LLD/TIMv1/driver.mk
+@@ -10,10 +10,14 @@ endif
+ ifneq ($(findstring HAL_USE_PWM TRUE,$(HALCONF)),)
+ PLATFORMSRC += $(CHIBIOS)/os/hal/ports/STM32/LLD/TIMv1/hal_pwm_lld.c
+ endif
++ifneq ($(findstring HAL_USE_QEI TRUE,$(HALCONF)),)
++PLATFORMSRC += $(CHIBIOS)/os/hal/ports/STM32/LLD/TIMv1/hal_qei_lld.c
++endif
+ else
+ PLATFORMSRC += $(CHIBIOS)/os/hal/ports/STM32/LLD/TIMv1/hal_gpt_lld.c
+ PLATFORMSRC += $(CHIBIOS)/os/hal/ports/STM32/LLD/TIMv1/hal_icu_lld.c
+ PLATFORMSRC += $(CHIBIOS)/os/hal/ports/STM32/LLD/TIMv1/hal_pwm_lld.c
++PLATFORMSRC += $(CHIBIOS)/os/hal/ports/STM32/LLD/TIMv1/hal_qei_lld.c
+ endif
+ 
+ PLATFORMINC += $(CHIBIOS)/os/hal/ports/STM32/LLD/TIMv1
+diff --git a/os/hal/ports/STM32/LLD/TIMv1/hal_qei_lld.c b/os/hal/ports/STM32/LLD/TIMv1/hal_qei_lld.c
+new file mode 100644
+index 0000000..cd1ab9b
+--- /dev/null
++++ b/os/hal/ports/STM32/LLD/TIMv1/hal_qei_lld.c
+@@ -0,0 +1,304 @@
++/*
++AMiRo-OS is an operating system designed for the Autonomous Mini Robot (AMiRo) platform.
++Copyright (C) 2016..2018  Thomas Schöpping et al.
++
++This program is free software: you can redistribute it and/or modify
++it under the terms of the GNU General Public License as published by
++the Free Software Foundation, either version 3 of the License, or
++(at your option) any later version.
++
++This program is distributed in the hope that it will be useful,
++but WITHOUT ANY WARRANTY; without even the implied warranty of
++MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++GNU General Public License for more details.
++
++You should have received a copy of the GNU General Public License
++along with this program.  If not, see <http://www.gnu.org/licenses/>.
++*/
++
++/**
++ * @file    STM32/hal_qei_lld.c
++ * @brief   STM32 QEI subsystem low level driver.
++ *
++ * @addtogroup QEI
++ * @{
++ */
++
++#include "hal.h"
++
++#if (HAL_USE_QEI == TRUE) || defined(__DOXYGEN__)
++
++/*===========================================================================*/
++/* Driver local definitions.                                                 */
++/*===========================================================================*/
++
++/*===========================================================================*/
++/* Driver exported variables.                                                */
++/*===========================================================================*/
++
++/**
++ * @brief   QEID1 driver identifier.
++ * @note    The driver QEID1 allocates the complex timer TIM1 when enabled.
++ */
++#if STM32_QEI_USE_TIM1 || defined(__DOXYGEN__)
++QEIDriver QEID1;
++#endif
++
++/**
++ * @brief   QEID2 driver identifier.
++ * @note    The driver QEID1 allocates the timer TIM2 when enabled.
++ */
++#if STM32_QEI_USE_TIM2 || defined(__DOXYGEN__)
++QEIDriver QEID2;
++#endif
++
++/**
++ * @brief   QEID3 driver identifier.
++ * @note    The driver QEID1 allocates the timer TIM3 when enabled.
++ */
++#if STM32_QEI_USE_TIM3 || defined(__DOXYGEN__)
++QEIDriver QEID3;
++#endif
++
++/**
++ * @brief   QEID4 driver identifier.
++ * @note    The driver QEID4 allocates the timer TIM4 when enabled.
++ */
++#if STM32_QEI_USE_TIM4 || defined(__DOXYGEN__)
++QEIDriver QEID4;
++#endif
++
++/**
++ * @brief   QEID5 driver identifier.
++ * @note    The driver QEID5 allocates the timer TIM5 when enabled.
++ */
++#if STM32_QEI_USE_TIM5 || defined(__DOXYGEN__)
++QEIDriver QEID5;
++#endif
++
++/**
++ * @brief   QEID8 driver identifier.
++ * @note    The driver QEID8 allocates the timer TIM8 when enabled.
++ */
++#if STM32_QEI_USE_TIM8 || defined(__DOXYGEN__)
++QEIDriver QEID8;
++#endif
++
++/*===========================================================================*/
++/* Driver local variables and types.                                         */
++/*===========================================================================*/
++
++/*===========================================================================*/
++/* Driver local functions.                                                   */
++/*===========================================================================*/
++
++/*===========================================================================*/
++/* Driver interrupt handlers.                                                */
++/*===========================================================================*/
++
++/*===========================================================================*/
++/* Driver exported functions.                                                */
++/*===========================================================================*/
++
++/**
++ * @brief   Low level QEI driver initialization.
++ *
++ * @notapi
++ */
++void qei_lld_init(void) {
++
++#if STM32_QEI_USE_TIM1
++  /* Driver initialization.*/
++  qeiObjectInit(&QEID1);
++  QEID1.tim = STM32_TIM1;
++#endif
++
++#if STM32_QEI_USE_TIM2
++  /* Driver initialization.*/
++  qeiObjectInit(&QEID2);
++  QEID2.tim = STM32_TIM2;
++#endif
++
++#if STM32_QEI_USE_TIM3
++  /* Driver initialization.*/
++  qeiObjectInit(&QEID3);
++  QEID3.tim = STM32_TIM3;
++#endif
++
++#if STM32_QEI_USE_TIM4
++  /* Driver initialization.*/
++  qeiObjectInit(&QEID4);
++  QEID4.tim = STM32_TIM4;
++#endif
++
++#if STM32_QEI_USE_TIM5
++  /* Driver initialization.*/
++  qeiObjectInit(&QEID5);
++  QEID5.tim = STM32_TIM5;
++#endif
++
++#if STM32_QEI_USE_TIM8
++  /* Driver initialization.*/
++  qeiObjectInit(&QEID8);
++  QEID8.tim = STM32_TIM8;
++#endif
++}
++
++/**
++ * @brief   Configures and activates the QEI peripheral.
++ *
++ * @param[in] qeip      pointer to the @p QEIDriver object
++ *
++ * @notapi
++ */
++void qei_lld_start(QEIDriver *qeip) {
++  uint32_t arr, ccer;
++
++  if (qeip->state == QEI_STOP) {
++    /* Clock activation and timer reset.*/
++#if STM32_QEI_USE_TIM1
++    if (&QEID1 == qeip) {
++      rccEnableTIM1();
++      rccResetTIM1();
++    }
++#endif
++#if STM32_QEI_USE_TIM2
++    if (&QEID2 == qeip) {
++      rccEnableTIM2();
++      rccResetTIM2();
++    }
++#endif
++#if STM32_QEI_USE_TIM3
++    if (&QEID3 == qeip) {
++      rccEnableTIM3();
++      rccResetTIM3();
++    }
++#endif
++#if STM32_QEI_USE_TIM4
++    if (&QEID4 == qeip) {
++      rccEnableTIM4();
++      rccResetTIM4();
++    }
++#endif
++
++#if STM32_QEI_USE_TIM5
++    if (&QEID5 == qeip) {
++      rccEnableTIM5();
++      rccResetTIM5();
++    }
++#endif
++#if STM32_QEI_USE_TIM8
++    if (&QEID8 == qeip) {
++      rccEnableTIM8();
++      rccResetTIM8();
++    }
++#endif
++  }
++  else {
++    /* Driver re-configuration scenario, it must be stopped first.*/
++    qeip->tim->CR1    = 0;                  /* Timer disabled.              */
++    qeip->tim->DIER   = 0;                  /* All IRQs disabled.           */
++    qeip->tim->SR     = 0;                  /* Clear eventual pending IRQs. */
++    qeip->tim->CCR[0] = 0;                  /* Comparator 1 disabled.       */
++    qeip->tim->CCR[1] = 0;                  /* Comparator 2 disabled.       */
++    qeip->tim->CNT    = 0;                  /* Counter reset to zero.       */
++  }
++
++  /* Timer configuration.*/
++  qeip->tim->PSC  = 0;
++  arr = qeip->config->range - 1;
++  osalDbgAssert((arr <= 0xFFFF), "invalid range");
++  qeip->tim->ARR  = arr & 0xFFFF;
++
++  /* CCMR1_CC1S = 01 - CH1 Input on TI1.
++     CCMR1_CC2S = 01 - CH2 Input on TI2.*/
++  qeip->tim->CCMR1 = TIM_CCMR1_CC1S_0 | TIM_CCMR1_CC2S_0;
++
++  ccer = 0;
++  if (qeip->config->channels[0].mode == QEI_INPUT_INVERTED)
++    ccer |= TIM_CCER_CC1P;
++  if (qeip->config->channels[1].mode == QEI_INPUT_INVERTED)
++    ccer |= TIM_CCER_CC2P;
++  qeip->tim->CCER = ccer;
++
++  if (qeip->config->mode == QEI_COUNT_CH1)
++    qeip->tim->SMCR  = TIM_SMCR_SMS_1;
++  else if (qeip->config->mode == QEI_COUNT_CH2)
++    qeip->tim->SMCR  = TIM_SMCR_SMS_0;
++  else
++    qeip->tim->SMCR  = TIM_SMCR_SMS_0 | TIM_SMCR_SMS_1;
++}
++
++/**
++ * @brief   Deactivates the QEI peripheral.
++ *
++ * @param[in] qeip      pointer to the @p QEIDriver object
++ *
++ * @notapi
++ */
++void qei_lld_stop(QEIDriver *qeip) {
++
++  if (qeip->state == QEI_READY) {
++    /* Clock deactivation.*/
++    qeip->tim->CR1  = 0;                    /* Timer disabled.              */
++
++#if STM32_QEI_USE_TIM1
++    if (&QEID1 == qeip) {
++      rccDisableTIM1();
++    }
++#endif
++#if STM32_QEI_USE_TIM2
++    if (&QEID2 == qeip) {
++      rccDisableTIM2();
++    }
++#endif
++#if STM32_QEI_USE_TIM3
++    if (&QEID3 == qeip) {
++      rccDisableTIM3();
++    }
++#endif
++#if STM32_QEI_USE_TIM4
++    if (&QEID4 == qeip) {
++      rccDisableTIM4();
++    }
++#endif
++#if STM32_QEI_USE_TIM5
++    if (&QEID5 == qeip) {
++      rccDisableTIM5();
++    }
++#endif
++  }
++#if STM32_QEI_USE_TIM8
++    if (&QEID8 == qeip) {
++      rccDisableTIM8();
++    }
++#endif
++}
++
++/**
++ * @brief   Enables the quadrature encoder.
++ *
++ * @param[in] qeip      pointer to the @p QEIDriver object
++ *
++ * @notapi
++ */
++void qei_lld_enable(QEIDriver *qeip) {
++
++  qeip->tim->CR1  = TIM_CR1_CEN;
++}
++
++/**
++ * @brief   Disables the quadrature encoder.
++ *
++ * @param[in] qeip      pointer to the @p QEIDriver object
++ *
++ * @notapi
++ */
++void qei_lld_disable(QEIDriver *qeip) {
++
++  qeip->tim->CR1  = 0;
++}
++
++#endif /* HAL_USE_QEI */
++
++/** @} */
+diff --git a/os/hal/ports/STM32/LLD/TIMv1/hal_qei_lld.h b/os/hal/ports/STM32/LLD/TIMv1/hal_qei_lld.h
+new file mode 100644
+index 0000000..ec1cd42
+--- /dev/null
++++ b/os/hal/ports/STM32/LLD/TIMv1/hal_qei_lld.h
+@@ -0,0 +1,302 @@
++/*
++AMiRo-OS is an operating system designed for the Autonomous Mini Robot (AMiRo) platform.
++Copyright (C) 2016..2018  Thomas Schöpping et al.
++
++This program is free software: you can redistribute it and/or modify
++it under the terms of the GNU General Public License as published by
++the Free Software Foundation, either version 3 of the License, or
++(at your option) any later version.
++
++This program is distributed in the hope that it will be useful,
++but WITHOUT ANY WARRANTY; without even the implied warranty of
++MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++GNU General Public License for more details.
++
++You should have received a copy of the GNU General Public License
++along with this program.  If not, see <http://www.gnu.org/licenses/>.
++*/
++
++/**
++ * @file    STM32/hal_qei_lld.h
++ * @brief   STM32 QEI subsystem low level driver header.
++ *
++ * @addtogroup QEI
++ * @{
++ */
++
++#ifndef HAL_QEI_LLD_H
++#define HAL_QEI_LLD_H
++
++#if (HAL_USE_QEI == TRUE) || defined(__DOXYGEN__)
++
++#include "stm32_tim.h"
++
++/*===========================================================================*/
++/* Driver constants.                                                         */
++/*===========================================================================*/
++
++/**
++ * @brief   Number of input channels per QEI driver.
++ */
++#define QEI_CHANNELS                            2
++
++/*===========================================================================*/
++/* Driver pre-compile time settings.                                         */
++/*===========================================================================*/
++
++/**
++ * @name    Configuration options
++ * @{
++ */
++/**
++ * @brief   QEID1 driver enable switch.
++ * @details If set to @p TRUE the support for QEID1 is included.
++ * @note    The default is @p TRUE.
++ */
++#if !defined(STM32_QEI_USE_TIM1) || defined(__DOXYGEN__)
++#define STM32_QEI_USE_TIM1                  FALSE
++#endif
++
++/**
++ * @brief   QEID2 driver enable switch.
++ * @details If set to @p TRUE the support for QEID2 is included.
++ * @note    The default is @p TRUE.
++ */
++#if !defined(STM32_QEI_USE_TIM2) || defined(__DOXYGEN__)
++#define STM32_QEI_USE_TIM2                  FALSE
++#endif
++
++/**
++ * @brief   QEID3 driver enable switch.
++ * @details If set to @p TRUE the support for QEID3 is included.
++ * @note    The default is @p TRUE.
++ */
++#if !defined(STM32_QEI_USE_TIM3) || defined(__DOXYGEN__)
++#define STM32_QEI_USE_TIM3                  FALSE
++#endif
++
++/**
++ * @brief   QEID4 driver enable switch.
++ * @details If set to @p TRUE the support for QEID4 is included.
++ * @note    The default is @p TRUE.
++ */
++#if !defined(STM32_QEI_USE_TIM4) || defined(__DOXYGEN__)
++#define STM32_QEI_USE_TIM4                  FALSE
++#endif
++
++/**
++ * @brief   QEID5 driver enable switch.
++ * @details If set to @p TRUE the support for QEID5 is included.
++ * @note    The default is @p TRUE.
++ */
++#if !defined(STM32_QEI_USE_TIM5) || defined(__DOXYGEN__)
++#define STM32_QEI_USE_TIM5                  FALSE
++#endif
++
++/**
++ * @brief   QEID8 driver enable switch.
++ * @details If set to @p TRUE the support for QEID8 is included.
++ * @note    The default is @p TRUE.
++ */
++#if !defined(STM32_QEI_USE_TIM8) || defined(__DOXYGEN__)
++#define STM32_QEI_USE_TIM8                  FALSE
++#endif
++/** @} */
++
++/*===========================================================================*/
++/* Derived constants and error checks.                                       */
++/*===========================================================================*/
++
++#if STM32_QEI_USE_TIM1 && !STM32_HAS_TIM1
++#error "TIM1 not present in the selected device"
++#endif
++
++#if STM32_QEI_USE_TIM2 && !STM32_HAS_TIM2
++#error "TIM2 not present in the selected device"
++#endif
++
++#if STM32_QEI_USE_TIM3 && !STM32_HAS_TIM3
++#error "TIM3 not present in the selected device"
++#endif
++
++#if STM32_QEI_USE_TIM4 && !STM32_HAS_TIM4
++#error "TIM4 not present in the selected device"
++#endif
++
++#if STM32_QEI_USE_TIM5 && !STM32_HAS_TIM5
++#error "TIM5 not present in the selected device"
++#endif
++
++#if STM32_QEI_USE_TIM8 && !STM32_HAS_TIM8
++#error "TIM8 not present in the selected device"
++#endif
++
++#if !STM32_QEI_USE_TIM1 && !STM32_QEI_USE_TIM2 &&                           \
++    !STM32_QEI_USE_TIM3 && !STM32_QEI_USE_TIM4 &&                           \
++    !STM32_QEI_USE_TIM5 && !STM32_QEI_USE_TIM8
++#error "QEI driver activated but no TIM peripheral assigned"
++#endif
++
++/*===========================================================================*/
++/* Driver data structures and types.                                         */
++/*===========================================================================*/
++
++/**
++ * @brief QEI driver mode.
++ */
++typedef enum {
++  QEI_COUNT_BOTH = 0,
++  QEI_COUNT_CH1 = 1,
++  QEI_COUNT_CH2 = 2,
++} qeimode_t;
++
++/**
++ * @brief QEI input mode.
++ */
++typedef enum {
++  QEI_INPUT_NONINVERTED = 0, /**< Input channel noninverted.*/
++  QEI_INPUT_INVERTED = 1, /**< Input channel inverted.*/
++} qeiinputmode_t;
++
++/**
++ * @brief   QEI count type.
++ */
++typedef uint32_t qeicnt_t;
++
++/**
++ * @brief   Driver channel configuration structure.
++ */
++typedef struct {
++  /**
++   * @brief Channel input logic.
++   */
++  qeiinputmode_t                 mode;
++  /* End of the mandatory fields.*/
++} QEIChannelConfig;
++
++/**
++ * @brief   Driver configuration structure.
++ */
++typedef struct {
++  /**
++   * @brief   Driver mode.
++   */
++  qeimode_t                 mode;
++  /**
++   * @brief   Channels configurations.
++   */
++  QEIChannelConfig          channels[QEI_CHANNELS];
++  /**
++   * @brief   Range in pulses.
++   */
++  qeicnt_t                  range;
++  /* End of the mandatory fields.*/
++} QEIConfig;
++
++/**
++ * @brief   Structure representing an QEI driver.
++ */
++struct QEIDriver {
++  /**
++   * @brief Driver state.
++   */
++  qeistate_t                state;
++  /**
++   * @brief Current configuration data.
++   */
++  const QEIConfig           *config;
++#if defined(QEI_DRIVER_EXT_FIELDS)
++  QEI_DRIVER_EXT_FIELDS
++#endif
++  /* End of the mandatory fields.*/
++  /**
++   * @brief Pointer to the TIMx registers block.
++   */
++  stm32_tim_t               *tim;
++};
++
++/*===========================================================================*/
++/* Driver macros.                                                            */
++/*===========================================================================*/
++
++/**
++ * @brief   Returns the direction of the last transition.
++ * @details The direction is defined as boolean and is
++ *          calculated at each transition on any input.
++ *
++ * @param[in] qeip      pointer to the @p QEIDriver object
++ * @return              The request direction.
++ * @retval FALSE        Position counted up.
++ * @retval TRUE         Position counted down.
++ *
++ * @iclass
++ */
++#define qei_lld_get_direction(qeip) !!((qeip)->tim->CR1 & TIM_CR1_DIR)
++
++/**
++ * @brief   Returns the position of the encoder.
++ * @details The position is defined as number of pulses since last reset.
++ *
++ * @param[in] qeip      pointer to the @p QEIDriver object
++ * @return              The number of pulses.
++ *
++ * @iclass
++ */
++#define qei_lld_get_position(qeip) ((qeip)->tim->CNT)
++
++/**
++ * @brief   Returns the range of the encoder.
++ * @details The range is defined as number of maximum pulse count.
++ *
++ * @param[in] qeip      pointer to the @p QEIDriver object
++ * @return              The number of pulses.
++ *
++ * @iclass
++ */
++#define qei_lld_get_range(qeip) ((qeip)->tim->ARR + 1)
++
++/*===========================================================================*/
++/* External declarations.                                                    */
++/*===========================================================================*/
++
++#if STM32_QEI_USE_TIM1 && !defined(__DOXYGEN__)
++extern QEIDriver QEID1;
++#endif
++
++#if STM32_QEI_USE_TIM2 && !defined(__DOXYGEN__)
++extern QEIDriver QEID2;
++#endif
++
++#if STM32_QEI_USE_TIM3 && !defined(__DOXYGEN__)
++extern QEIDriver QEID3;
++#endif
++
++#if STM32_QEI_USE_TIM4 && !defined(__DOXYGEN__)
++extern QEIDriver QEID4;
++#endif
++
++#if STM32_QEI_USE_TIM5 && !defined(__DOXYGEN__)
++extern QEIDriver QEID5;
++#endif
++
++#if STM32_QEI_USE_TIM8 && !defined(__DOXYGEN__)
++extern QEIDriver QEID8;
++#endif
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++  void qei_lld_init(void);
++  void qei_lld_start(QEIDriver *qeip);
++  void qei_lld_stop(QEIDriver *qeip);
++  void qei_lld_enable(QEIDriver *qeip);
++  void qei_lld_disable(QEIDriver *qeip);
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* HAL_USE_QEI */
++
++#endif /* HAL_QEI_LLD_H */
++
++/** @} */
+diff --git a/os/hal/src/hal_qei.c b/os/hal/src/hal_qei.c
+new file mode 100644
+index 0000000..00334bb
+--- /dev/null
++++ b/os/hal/src/hal_qei.c
+@@ -0,0 +1,152 @@
++/*
++AMiRo-OS is an operating system designed for the Autonomous Mini Robot (AMiRo) platform.
++Copyright (C) 2016..2018  Thomas Schöpping et al.
++
++This program is free software: you can redistribute it and/or modify
++it under the terms of the GNU General Public License as published by
++the Free Software Foundation, either version 3 of the License, or
++(at your option) any later version.
++
++This program is distributed in the hope that it will be useful,
++but WITHOUT ANY WARRANTY; without even the implied warranty of
++MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++GNU General Public License for more details.
++
++You should have received a copy of the GNU General Public License
++along with this program.  If not, see <http://www.gnu.org/licenses/>.
++*/
++
++/**
++ * @file    hal_qei.c
++ * @brief   QEI Driver code.
++ *
++ * @addtogroup QEI
++ * @{
++ */
++
++#include "hal.h"
++
++#if (HAL_USE_QEI == TRUE) || defined(__DOXYGEN__)
++
++/*===========================================================================*/
++/* Driver local definitions.                                                 */
++/*===========================================================================*/
++
++/*===========================================================================*/
++/* Driver exported variables.                                                */
++/*===========================================================================*/
++
++/*===========================================================================*/
++/* Driver local variables.                                                   */
++/*===========================================================================*/
++
++/*===========================================================================*/
++/* Driver local functions.                                                   */
++/*===========================================================================*/
++
++/*===========================================================================*/
++/* Driver exported functions.                                                */
++/*===========================================================================*/
++
++/**
++ * @brief   QEI Driver initialization.
++ * @note    This function is implicitly invoked by @p halInit(), there is
++ *          no need to explicitly initialize the driver.
++ *
++ * @init
++ */
++void qeiInit(void) {
++
++  qei_lld_init();
++}
++
++/**
++ * @brief   Initializes the standard part of a @p QEIDriver structure.
++ *
++ * @param[out] qeip     pointer to the @p QEIDriver object
++ *
++ * @init
++ */
++void qeiObjectInit(QEIDriver *qeip) {
++
++  qeip->state  = QEI_STOP;
++  qeip->config = NULL;
++}
++
++/**
++ * @brief   Configures and activates the QEI peripheral.
++ *
++ * @param[in] qeip      pointer to the @p QEIDriver object
++ * @param[in] config    pointer to the @p QEIConfig object
++ *
++ * @api
++ */
++void qeiStart(QEIDriver *qeip, const QEIConfig *config) {
++
++  osalDbgCheck((qeip != NULL) && (config != NULL));
++
++  osalSysLock();
++  osalDbgAssert((qeip->state == QEI_STOP) || (qeip->state == QEI_READY), "invalid state");
++  qeip->config = config;
++  qei_lld_start(qeip);
++  qeip->state = QEI_READY;
++  osalSysUnlock();
++}
++
++/**
++ * @brief   Deactivates the QEI peripheral.
++ *
++ * @param[in] qeip      pointer to the @p QEIDriver object
++ *
++ * @api
++ */
++void qeiStop(QEIDriver *qeip) {
++
++  osalDbgCheck(qeip != NULL);
++
++  osalSysLock();
++  osalDbgAssert((qeip->state == QEI_STOP) || (qeip->state == QEI_READY), "invalid state");
++  qei_lld_stop(qeip);
++  qeip->state = QEI_STOP;
++  osalSysUnlock();
++}
++
++/**
++ * @brief   Enables the quadrature encoder.
++ *
++ * @param[in] qeip      pointer to the @p QEIDriver object
++ *
++ * @api
++ */
++void qeiEnable(QEIDriver *qeip) {
++
++  osalDbgCheck(qeip != NULL);
++
++  osalSysLock();
++  osalDbgAssert(qeip->state == QEI_READY, "invalid state");
++  qei_lld_enable(qeip);
++  qeip->state = QEI_ACTIVE;
++  osalSysUnlock();
++}
++
++/**
++ * @brief   Disables the quadrature encoder.
++ *
++ * @param[in] qeip      pointer to the @p QEIDriver object
++ *
++ * @api
++ */
++void qeiDisable(QEIDriver *qeip) {
++
++  osalDbgCheck(qeip != NULL);
++
++  osalSysLock();
++  osalDbgAssert((qeip->state == QEI_READY) || (qeip->state == QEI_ACTIVE), "invalid state");
++  qei_lld_disable(qeip);
++  qeip->state = QEI_READY;
++  osalSysUnlock();
++}
++
++#endif /* HAL_USE_QEI */
++
++/** @} */
